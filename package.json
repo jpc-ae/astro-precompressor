@@ -1,0 +1,80 @@
+{
+	"name": "astro-precompressor",
+	"version": "0.2.0",
+	"description": "Precompresses Astro output document files to brotli (.br) and gzip (.gz)",
+	"main": "./dist/index.js",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"format": "biome format --write .",
+		"lint": "biome lint .",
+		"check": "biome ci .",
+		"clean": "node scripts/clean.mjs",
+		"build": "pnpm clean && tsc -p tsconfig.build.json",
+		"dev": "tsc -p tsconfig.build.json --watch",
+		"typecheck": "tsc --noEmit",
+		"typecheck:tests": "tsc -p tsconfig.test.json",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:coverage": "vitest run --coverage",
+		"prepack": "pnpm build"
+	},
+	"keywords": [
+		"astro",
+		"astro-integration",
+		"compression",
+		"precompression",
+		"gzip",
+		"brotli",
+		"zopfli",
+		"static-site",
+		"build-tool",
+		"web-performance",
+		"asset-optimization"
+	],
+	"author": "Jason P. Cochrane <appliedelegance@gmail.com>",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/jpc-ae/astro-precompressor.git"
+	},
+	"homepage": "https://github.com/jpc-ae/astro-precompressor#readme",
+	"bugs": {
+		"url": "https://github.com/jpc-ae/astro-precompressor/issues"
+	},
+	"devEngines": {
+		"packageManager": {
+			"name": "pnpm",
+			"version": "12.18.0",
+			"onFail": "download"
+		}
+	},
+	"packageManager": "pnpm@12.18.0",
+	"type": "module",
+	"peerDependencies": {
+		"astro": "^7.4.6",
+		"node-zopfli-es": "^2.0.6"
+	},
+	"peerDependenciesMeta": {
+		"node-zopfli-es": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.6.6",
+		"@types/node": "^26.6.6",
+		"@types/node-zopfli-es": "^0.0.4",
+		"@vitest/coverage-v8": "^5.1.0",
+		"astro": "^7.4.6",
+		"node-zopfli-es": "^2.0.6",
+		"typescript": "^7.0.2",
+		"vitest": "^5.1.0"
+	}
+}
