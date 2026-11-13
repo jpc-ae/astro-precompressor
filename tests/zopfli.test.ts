@@ -1,84 +1,111 @@
 import { gunzipSync } from 'node:zlib'
-import { join } from 'node:path'
+import { Readable, Transform } from 'node:stream'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { loadZopfli } from '../src/integration.js'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-
-import {
-	createTestEnvironment,
-	createTestFile,
-	readTestFile,
-	removeTestDirectory,
-	runIntegration,
-	type TestEnvironment,
-} from './helpers'
-
-// -----------------------------------------------------------------------------
-// Setup
-// -----------------------------------------------------------------------------
-
-describe('Zopfli compression', () => {
-	let environment: TestEnvironment
-
-	beforeEach(async () => {
-		environment = await createTestEnvironment()
+describe('Zopfli', () => {
+	afterEach(() => {
+		vi.doUnmock('node-zopfli-es')
+		vi.resetModules()
 	})
 
-	afterEach(async () => {
-		await removeTestDirectory(environment.root)
-	})
+	describe('loadZopfli', () => {
+		it('loads the Zopfli module', async () => {
+			const zopfli = await loadZopfli()
 
-	// ---------------------------------------------------------------------------
-	// Integration
-	// ---------------------------------------------------------------------------
-
-	it('loads Zopfli during integration initialization', async () => {
-		const contents = '<html><body>Hello, Zopfli!</body></html>'
-
-		await createTestFile(environment.outputDirectory, 'index.html', contents)
-
-		// runIntegration invokes the integration factory first, then its
-		// config:setup and build:done hooks.
-		await runIntegration(environment, {
-			algorithms: ['gzip'],
-			useZopfli: true,
+			expect(zopfli).toBeDefined()
+			expect(zopfli.createGzip).toBeTypeOf('function')
 		})
 
-		const compressed = await readTestFile(join(environment.outputDirectory, 'index.html.gz'))
+		it('returns a module that creates Gzip streams', async () => {
+			const zopfli = await loadZopfli()
+			const compressor = zopfli.createGzip()
 
-		expect(gunzipSync(compressed).toString()).toBe(contents)
-	})
+			expect(compressor).toBeInstanceOf(Transform)
 
-	it('generates valid Gzip output with custom Zopfli options', async () => {
-		const contents =
-			'<html><body>' + 'Zopfli compression test content. '.repeat(1000) + '</body></html>'
-
-		await createTestFile(environment.outputDirectory, 'index.html', contents)
-
-		await runIntegration(environment, {
-			algorithms: ['gzip'],
-			useZopfli: {
-				numiterations: 30,
-			},
+			compressor.destroy()
 		})
 
-		const compressed = await readTestFile(join(environment.outputDirectory, 'index.html.gz'))
+		it('rejects when the Zopfli module cannot be loaded', async () => {
+			vi.resetModules()
 
-		expect(compressed.length).toBeGreaterThan(0)
-		expect(gunzipSync(compressed).toString()).toBe(contents)
+			vi.doMock('node-zopfli-es', () => {
+				throw new Error('Module unavailable')
+			})
+
+			const { loadZopfli: load } = await import('../src/integration.js')
+
+			await expect(load()).rejects.toThrow()
+		})
 	})
 
-	it('does not require Zopfli when only Brotli is enabled', async () => {
-		const contents = '<html><body>Brotli only</body></html>'
+	describe('compression', () => {
+		it('produces valid Gzip data', async () => {
+			const content = Buffer.from('<html><body>Test content</body></html>\n'.repeat(100))
 
-		await createTestFile(environment.outputDirectory, 'index.html', contents)
+			const zopfli = await loadZopfli()
+			const compressor = zopfli.createGzip()
+			const chunks: Buffer[] = []
 
-		await runIntegration(environment, {
-			algorithms: ['brotli'],
-			useZopfli: true,
+			for await (const chunk of Readable.from([content]).pipe(compressor)) {
+				chunks.push(Buffer.from(chunk))
+			}
+
+			const compressed = Buffer.concat(chunks)
+
+			expect(compressed.length).toBeGreaterThan(0)
+			expect(gunzipSync(compressed)).toEqual(content)
 		})
 
-		const compressed = await readTestFile(join(environment.outputDirectory, 'index.html.br'))
+		it('compresses empty input into valid Gzip data', async () => {
+			const content = Buffer.alloc(0)
 
-		expect(compressed.length).toBeGreaterThan(0)
+			const zopfli = await loadZopfli()
+			const compressor = zopfli.createGzip()
+			const chunks: Buffer[] = []
+
+			for await (const chunk of Readable.from([content]).pipe(compressor)) {
+				chunks.push(Buffer.from(chunk))
+			}
+
+			const compressed = Buffer.concat(chunks)
+
+			expect(compressed.length).toBeGreaterThan(0)
+			expect(gunzipSync(compressed)).toEqual(content)
+		})
+
+		it('handles binary input', async () => {
+			const content = Buffer.from(Array.from({ length: 1024 }, (_, index) => index % 256))
+
+			const zopfli = await loadZopfli()
+			const compressor = zopfli.createGzip()
+			const chunks: Buffer[] = []
+
+			for await (const chunk of Readable.from([content]).pipe(compressor)) {
+				chunks.push(Buffer.from(chunk))
+			}
+
+			const compressed = Buffer.concat(chunks)
+
+			expect(gunzipSync(compressed)).toEqual(content)
+		})
+
+		it('accepts custom Zopfli options', async () => {
+			const content = Buffer.from('<html><body>Custom options</body></html>\n'.repeat(100))
+
+			const zopfli = await loadZopfli()
+			const compressor = zopfli.createGzip({
+				numiterations: 5,
+			})
+			const chunks: Buffer[] = []
+
+			for await (const chunk of Readable.from([content]).pipe(compressor)) {
+				chunks.push(Buffer.from(chunk))
+			}
+
+			const compressed = Buffer.concat(chunks)
+
+			expect(gunzipSync(compressed)).toEqual(content)
+		})
 	})
 })

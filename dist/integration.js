@@ -1,11 +1,12 @@
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_ALGORITHMS, DEFAULT_CONCURRENCY, DEFAULT_FILE_TYPES, DEFAULT_ZOPFLI_OPTIONS, PLUGIN_NAME, } from './constants.js';
-import { createConfigHash, normalizeExtensions } from './utils.js';
+import { DEFAULT_CONCURRENCY, DEFAULT_FILE_TYPES, DEFAULT_ZLIB_OPTIONS, DEFAULT_BROTLI_OPTIONS, DEFAULT_ZSTD_OPTIONS, DEFAULT_ZOPFLI_OPTIONS, PLUGIN_NAME, DEFAULT_MIN_SIZE, SILLY_FILE_TYPES, DEFAULT_ALGORITHMS, DEFAULT_LOG_LEVEL, } from './constants.js';
+import { createConfigHash, getPackageManager, log, normalizeExtensions } from './utils.js';
 import { runBuild } from './build.js';
+import { resolve } from 'node:path';
 /**
  * Dynamically load zopfli when needed
  */
-async function loadZopfli() {
+export async function loadZopfli() {
     try {
         const zopfliPackage = (await import('node-zopfli-es'));
         return zopfliPackage.default;
@@ -17,8 +18,7 @@ async function loadZopfli() {
             ['bun', 'bun add -d node-zopfli-es'],
             ['npm', 'npm install -D node-zopfli-es'],
         ]);
-        const userAgent = process.env.npm_config_user_agent ?? '';
-        const packageManager = ['pnpm', 'yarn', 'bun', 'npm'].find(manager => userAgent.includes(manager));
+        const packageManager = getPackageManager();
         const command = packageManager ? installScripts.get(packageManager) : undefined;
         throw new Error(`The "node-zopfli-es" package is required when Zopfli is enabled.${command ? ` Install it with: ${command}` : ''}`, { cause: error });
     }
@@ -36,35 +36,78 @@ function resolveZopfliOptions(value) {
     };
     return options;
 }
-function resolveAlgorithms(algorithms) {
-    const resolved = [...new Set(algorithms ?? DEFAULT_ALGORITHMS)];
-    for (const algorithm of resolved) {
-        if (algorithm !== 'brotli' && algorithm !== 'gzip') {
-            throw new Error(`[${PLUGIN_NAME}] Unsupported compression algorithm: "${algorithm}".`);
+function resolveGzipOptions(value) {
+    if (!value) {
+        return false;
+    }
+    if (typeof value === 'object' && 'zopfli' in value) {
+        const zopfliOptions = resolveZopfliOptions(value.zopfli);
+        if (zopfliOptions) {
+            return { zopfli: zopfliOptions };
         }
     }
-    if (resolved.length === 0) {
-        throw new Error(`[${PLUGIN_NAME}] At least one compression algorithm must be specified.`);
+    return {
+        ...DEFAULT_ZLIB_OPTIONS,
+        ...(typeof value === 'object' ? value : {}),
+    };
+}
+function resolveBrotliOptions(value) {
+    if (!value) {
+        return false;
     }
-    return resolved;
+    const options = {
+        ...DEFAULT_BROTLI_OPTIONS,
+        ...(typeof value === 'object' ? value : {}),
+    };
+    return options;
+}
+function resolveZstdOptions(value) {
+    if (!value) {
+        return false;
+    }
+    const options = {
+        ...DEFAULT_ZSTD_OPTIONS,
+        ...(typeof value === 'object' ? value : {}),
+    };
+    return options;
 }
 function resolveOptions(userOptions) {
-    const options = {
-        concurrency: userOptions.concurrency ?? DEFAULT_CONCURRENCY,
-        incremental: userOptions.incremental ?? true,
-        minSize: userOptions.minSize ?? 0,
-        failOnError: userOptions.failOnError ?? false,
-        prune: userOptions.prune ?? false,
-        useZopfli: resolveZopfliOptions(userOptions.useZopfli),
-        recompressOnConfigChange: userOptions.recompressOnConfigChange ?? false,
-        logLevel: userOptions.logLevel ?? 0,
-        fileTypes: normalizeExtensions(userOptions.fileTypes ?? DEFAULT_FILE_TYPES),
-        algorithms: resolveAlgorithms(userOptions.algorithms),
+    const algorithms = {
+        ...DEFAULT_ALGORITHMS,
+        ...userOptions.algorithms,
     };
-    if (!Number.isInteger(options.concurrency) || options.concurrency < 1) {
+    const options = {
+        algorithms: {
+            gzip: resolveGzipOptions(algorithms.gzip),
+            brotli: resolveBrotliOptions(algorithms.brotli),
+            zstd: resolveZstdOptions(algorithms.zstd),
+        },
+        performance: {
+            concurrency: userOptions.performance?.concurrency ?? DEFAULT_CONCURRENCY,
+            incremental: userOptions.performance?.incremental ?? true,
+            discardCompressionIfLarger: userOptions.performance?.discardCompressionIfLarger ?? true,
+        },
+        filters: {
+            minSize: userOptions.filters?.minSize ?? DEFAULT_MIN_SIZE,
+            fileTypes: normalizeExtensions(userOptions.filters?.fileTypes ?? DEFAULT_FILE_TYPES),
+            include: userOptions.filters?.include,
+            exclude: userOptions.filters?.exclude,
+            pruneCache: userOptions.filters?.pruneCache ?? true,
+        },
+        logLevel: userOptions.logLevel ?? DEFAULT_LOG_LEVEL,
+        failOnError: userOptions.failOnError ?? false,
+        recompressOnConfigChange: userOptions.recompressOnConfigChange ?? false,
+    };
+    if (!(options.algorithms.gzip || options.algorithms.brotli || options.algorithms.zstd)) {
+        throw new Error(`[${PLUGIN_NAME}] At least one compression algorithm must be enabled.`);
+    }
+    if (!Number.isInteger(options.performance.concurrency) || options.performance.concurrency < 1) {
         throw new Error(`[${PLUGIN_NAME}] concurrency must be a positive integer.`);
     }
-    if (!Number.isFinite(options.minSize) || options.minSize < 0) {
+    if (!options.filters.fileTypes.length) {
+        throw new Error(`[${PLUGIN_NAME}] At least one file type must be provided.`);
+    }
+    if (!Number.isFinite(options.filters.minSize) || options.filters.minSize < 0) {
         throw new Error(`[${PLUGIN_NAME}] minSize must be a non-negative number.`);
     }
     if (![0, 1, 2].includes(options.logLevel)) {
@@ -77,7 +120,7 @@ function resolveOptions(userOptions) {
 // -----------------------------------------------------------------------------
 export default function precompressor(userOptions = {}) {
     const options = resolveOptions(userOptions);
-    const shouldLoadZopfli = options.algorithms.includes('gzip') && Boolean(options.useZopfli);
+    const shouldLoadZopfli = options.algorithms.gzip && 'zopfli' in options.algorithms.gzip;
     // Start zopfli import while vite is still available, ignoring errors if unawaited
     const zopfliPromise = shouldLoadZopfli ? loadZopfli() : undefined;
     void zopfliPromise?.catch(() => { });
@@ -90,11 +133,16 @@ export default function precompressor(userOptions = {}) {
             'astro:config:setup': async ({ config, logger }) => {
                 // Finish loading Zopfli only if needed
                 if (shouldLoadZopfli) {
-                    logger.debug('Loading Zopfli');
+                    log(logger, options, 2, 'Loading Zopfli');
                     zopfli = await zopfliPromise;
                 }
-                cacheDirectory = fileURLToPath(config.cacheDir);
+                cacheDirectory = resolve(fileURLToPath(config.cacheDir));
                 configHash = createConfigHash(config, options);
+                for (const fileType of options.filters.fileTypes) {
+                    if (SILLY_FILE_TYPES.includes(fileType)) {
+                        logger.warn(`Compressing ${fileType} files is silly, but since you asked...`);
+                    }
+                }
             },
             'astro:build:done': async ({ dir, logger }) => {
                 if (!cacheDirectory || !configHash) {

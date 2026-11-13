@@ -59,5 +59,22 @@
 		"formatter": {
 			"expand": "always"
 		}
-	}
+	},
+	"markdown": {
+		"formatter": {
+			"enabled": true,
+			"proseWrap": "always",
+			"lineWidth": 80
+		}
+	},
+	"overrides": [
+		{
+			"includes": [
+				"src/constants.ts"
+			],
+			"formatter": {
+				"expand": "always"
+			}
+		}
+	]
 }

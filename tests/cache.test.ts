@@ -1,179 +1,326 @@
-import { rm } from 'node:fs/promises'
+import { readFile, stat, utimes, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import {
-	createTestEnvironment,
-	createTestFile,
-	createTestLogger,
-	removeTestDirectory,
-	runIntegration,
-} from './helpers'
+	copyPreservingTimestamps,
+	emptyCache,
+	fileExists,
+	getArtifactPath,
+	loadCache,
+	pruneCache,
+	removeDisabledArtifacts,
+	saveCache,
+} from '../src/cache.js'
 
-import type { TestEnvironment } from './helpers'
+import { ALGORITHM_EXTENSIONS, CACHE_VERSION } from '../src/constants.js'
+import { createFile, createTempDirectory, removeTempDirectory } from './helpers.js'
 
-const CONTENT = 'A document used to test incremental compression caching.'
-
-describe('compression cache', () => {
-	const forkedLogger = createTestLogger()
-	let environment: TestEnvironment
-
-	beforeEach(async () => {
-		environment = await createTestEnvironment()
-		environment.logger.fork.mockReturnValue(forkedLogger)
-	})
+describe('cache manifest', () => {
+	let directory = ''
 
 	afterEach(async () => {
-		await removeTestDirectory(environment.root)
+		if (directory) {
+			await removeTempDirectory(directory)
+			directory = ''
+		}
 	})
 
-	it('creates a cache manifest', async () => {
-		await createTestFile(environment.outputDirectory, 'index.html', CONTENT)
-
-		await runIntegration(environment)
-
-		const { readdir } = await import('node:fs/promises')
-
-		const pluginDirectory = `${environment.cacheDirectory}/astro-precompressor`
-
-		const files = await readdir(pluginDirectory)
-
-		expect(files.some(file => file.endsWith('.json'))).toBe(true)
-	})
-
-	it('reuses cached compression on subsequent builds', async () => {
-		await createTestFile(environment.outputDirectory, 'index.html', CONTENT)
-
-		await runIntegration(environment)
-
-		await runIntegration(environment, {
-			logLevel: 1,
+	it('creates an empty cache', () => {
+		expect(emptyCache()).toEqual({
+			version: CACHE_VERSION,
+			configHash: null,
+			entries: {},
 		})
-
-		expect(
-			forkedLogger.info.mock.calls.some(([message]) =>
-				String(message).includes('reused cache entry'),
-			),
-		).toBe(true)
 	})
 
-	it('regenerates compression when source contents change', async () => {
-		const sourcePath = await createTestFile(environment.outputDirectory, 'index.html', CONTENT)
+	it('loads a valid manifest', async () => {
+		directory = await createTempDirectory()
 
-		await runIntegration(environment)
+		const manifestPath = join(directory, 'cache.json')
 
-		await createTestFile(environment.outputDirectory, 'index.html', `${CONTENT} Updated.`)
-
-		await runIntegration(environment, {
-			logLevel: 1,
-		})
-
-		expect(forkedLogger.info.mock.calls.some(([message]) => String(message).includes('→'))).toBe(
-			true,
+		await writeFile(
+			manifestPath,
+			JSON.stringify({
+				version: CACHE_VERSION,
+				configHash: 'config-hash',
+				entries: {
+					'index.html': 'file-hash',
+				},
+			}),
 		)
 
-		expect(sourcePath).toContain('index.html')
+		await expect(loadCache(manifestPath)).resolves.toEqual({
+			version: CACHE_VERSION,
+			configHash: 'config-hash',
+			entries: {
+				'index.html': 'file-hash',
+			},
+		})
 	})
 
-	it('recompresses when configuration changes and recompressOnConfigChange is enabled', async () => {
-		await createTestFile(environment.outputDirectory, 'index.html', CONTENT)
+	it('ignores entries with non-string values', async () => {
+		directory = await createTempDirectory()
 
-		await runIntegration(environment, {
-			recompressOnConfigChange: true,
-			minSize: 0,
+		const manifestPath = join(directory, 'cache.json')
+
+		await writeFile(
+			manifestPath,
+			JSON.stringify({
+				version: CACHE_VERSION,
+				configHash: null,
+				entries: {
+					valid: 'hash',
+					invalid: 123,
+				},
+			}),
+		)
+
+		const cache = await loadCache(manifestPath)
+
+		expect(cache.entries).toEqual({
+			valid: 'hash',
 		})
+	})
 
-		await runIntegration(environment, {
-			recompressOnConfigChange: true,
-			minSize: 1,
-			logLevel: 1,
-		})
+	it('returns an empty cache for an unsupported version', async () => {
+		directory = await createTempDirectory()
 
-		expect(forkedLogger.info.mock.calls.some(([message]) => String(message).includes('→'))).toBe(
-			true,
+		const manifestPath = join(directory, 'cache.json')
+
+		await writeFile(
+			manifestPath,
+			JSON.stringify({
+				version: CACHE_VERSION + 1,
+				entries: {},
+			}),
+		)
+
+		expect(await loadCache(manifestPath)).toEqual(emptyCache())
+	})
+
+	it('returns an empty cache for malformed JSON', async () => {
+		directory = await createTempDirectory()
+
+		const manifestPath = join(directory, 'cache.json')
+		await writeFile(manifestPath, '{invalid json')
+
+		expect(await loadCache(manifestPath)).toEqual(emptyCache())
+	})
+
+	it('returns an empty cache when the manifest does not exist', async () => {
+		directory = await createTempDirectory()
+
+		expect(await loadCache(join(directory, 'missing.json'))).toEqual(emptyCache())
+	})
+
+	it('saves and reloads a manifest', async () => {
+		directory = await createTempDirectory()
+
+		const manifestPath = join(directory, 'nested', 'cache.json')
+
+		const cache = {
+			version: CACHE_VERSION,
+			configHash: 'config-hash',
+			entries: {
+				'index.html': 'file-hash',
+			},
+		}
+
+		await saveCache(manifestPath, cache)
+
+		expect(await loadCache(manifestPath)).toEqual(cache)
+		expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toEqual(cache)
+	})
+})
+
+describe('artifact paths', () => {
+	it('creates an artifact path with the algorithm extension', () => {
+		expect(getArtifactPath('/cache/artifacts', 'assets/index.html', '.gz')).toBe(
+			join('/cache/artifacts', 'assets', 'index.html.gz'),
 		)
 	})
 
-	it('does not force recompression when configuration changes and the option is disabled', async () => {
-		await createTestFile(environment.outputDirectory, 'index.html', CONTENT)
-
-		await runIntegration(environment)
-
-		await runIntegration(environment, {
-			minSize: 1,
-			logLevel: 1,
-		})
-
-		expect(
-			forkedLogger.info.mock.calls.some(([message]) =>
-				String(message).includes('reused cache entry'),
-			),
-		).toBe(true)
+	it('rejects paths outside the artifact directory', () => {
+		expect(() => getArtifactPath('/cache/artifacts', '../outside.html', '.gz')).toThrow(
+			'Invalid cache path',
+		)
 	})
 
-	it('prunes cache entries for deleted source files', async () => {
-		const sourcePath = await createTestFile(environment.outputDirectory, 'index.html', CONTENT)
+	it('checks whether a file exists', async () => {
+		const directory = await createTempDirectory()
 
-		await runIntegration(environment, {
-			prune: true,
-		})
+		try {
+			const filePath = await createFile(directory, 'artifact.gz')
 
-		await rm(sourcePath)
-
-		const logger = await runIntegration(environment, {
-			prune: true,
-		})
-
-		expect(
-			logger.info.mock.calls.some(([message]) =>
-				String(message).includes('Pruned 1 stale cache entry'),
-			),
-		).toBe(true)
-
-		await expect(
-			import('node:fs/promises').then(({ access }) => access(`${sourcePath}.br`)),
-		).rejects.toThrow()
-
-		await expect(
-			import('node:fs/promises').then(({ access }) => access(`${sourcePath}.gz`)),
-		).rejects.toThrow()
+			expect(await fileExists(filePath)).toBe(true)
+			expect(await fileExists(join(directory, 'missing.gz'))).toBe(false)
+		} finally {
+			await removeTempDirectory(directory)
+		}
 	})
 
-	it('removes disabled algorithm artifacts when pruning is enabled', async () => {
-		const sourcePath = await createTestFile(environment.outputDirectory, 'index.html', CONTENT)
+	it('returns false for a directory', async () => {
+		const directory = await createTempDirectory()
 
-		await runIntegration(environment, {
-			prune: true,
-			algorithms: ['brotli', 'gzip'],
-		})
+		try {
+			expect(await fileExists(directory)).toBe(false)
+		} finally {
+			await removeTempDirectory(directory)
+		}
+	})
+})
 
-		await runIntegration(environment, {
-			prune: true,
-			algorithms: ['brotli'],
-		})
+describe('copyPreservingTimestamps', () => {
+	let directory = ''
 
-		await expect(
-			import('node:fs/promises').then(({ access }) => access(`${sourcePath}.br`)),
-		).resolves.toBeUndefined()
-
-		await expect(
-			import('node:fs/promises').then(({ access }) => access(`${sourcePath}.gz`)),
-		).rejects.toThrow()
+	afterEach(async () => {
+		if (directory) {
+			await removeTempDirectory(directory)
+			directory = ''
+		}
 	})
 
-	it('preserves disabled algorithm artifacts when pruning is disabled', async () => {
-		const sourcePath = await createTestFile(environment.outputDirectory, 'index.html', CONTENT)
+	it('copies the file and preserves its timestamps', async () => {
+		directory = await createTempDirectory()
 
-		await runIntegration(environment, {
-			algorithms: ['brotli', 'gzip'],
-		})
+		const source = await createFile(directory, 'cache/file.gz', 'compressed data')
+		const destination = join(directory, 'output/file.gz')
 
-		await runIntegration(environment, {
-			algorithms: ['brotli'],
-		})
+		const timestamp = new Date('2020-01-01T12:00:00.000Z')
+
+		await utimes(source, timestamp, timestamp)
+
+		await copyPreservingTimestamps(source, destination)
+
+		const sourceStats = await stat(source)
+		const destinationStats = await stat(destination)
+
+		expect(await readFile(destination, 'utf8')).toBe('compressed data')
+		expect(destinationStats.mtimeMs).toBe(sourceStats.mtimeMs)
+	})
+
+	it('does not change the source artifact timestamp', async () => {
+		directory = await createTempDirectory()
+
+		const source = await createFile(directory, 'cache/file.gz')
+		const destination = join(directory, 'output/file.gz')
+
+		const timestamp = new Date('2020-01-01T12:00:00.000Z')
+		await utimes(source, timestamp, timestamp)
+
+		await copyPreservingTimestamps(source, destination)
+
+		expect((await stat(source)).mtimeMs).toBe(timestamp.getTime())
+	})
+
+	it('rejects when the source file does not exist', async () => {
+		directory = await createTempDirectory()
 
 		await expect(
-			import('node:fs/promises').then(({ access }) => access(`${sourcePath}.gz`)),
-		).resolves.toBeUndefined()
+			copyPreservingTimestamps(join(directory, 'missing.gz'), join(directory, 'output.gz')),
+		).rejects.toThrow()
+	})
+})
+
+describe('pruneCache', () => {
+	let directory = ''
+
+	afterEach(async () => {
+		if (directory) {
+			await removeTempDirectory(directory)
+			directory = ''
+		}
+	})
+
+	it('removes stale artifacts and their manifest entries', async () => {
+		directory = await createTempDirectory()
+
+		const artifactDirectory = join(directory, 'artifacts')
+
+		const retainedKey = 'retained/index.html'
+		const staleKey = 'removed/index.html'
+
+		for (const extension of Object.values(ALGORITHM_EXTENSIONS)) {
+			await createFile(artifactDirectory, `${retainedKey}${extension}`)
+			await createFile(artifactDirectory, `${staleKey}${extension}`)
+		}
+
+		const cache = {
+			version: CACHE_VERSION,
+			configHash: null,
+			entries: {
+				[retainedKey]: 'retained-hash',
+				[staleKey]: 'stale-hash',
+			},
+		}
+
+		const removed = await pruneCache(cache, artifactDirectory, new Set([retainedKey]))
+
+		expect(removed).toBe(1)
+		expect(cache.entries).toEqual({
+			[retainedKey]: 'retained-hash',
+		})
+
+		for (const extension of Object.values(ALGORITHM_EXTENSIONS)) {
+			expect(await fileExists(getArtifactPath(artifactDirectory, retainedKey, extension))).toBe(
+				true,
+			)
+
+			expect(await fileExists(getArtifactPath(artifactDirectory, staleKey, extension))).toBe(false)
+		}
+	})
+
+	it('does not remove entries that are still current', async () => {
+		directory = await createTempDirectory()
+
+		const key = 'index.html'
+
+		const cache = {
+			version: CACHE_VERSION,
+			configHash: null,
+			entries: {
+				[key]: 'hash',
+			},
+		}
+
+		expect(await pruneCache(cache, join(directory, 'artifacts'), new Set([key]))).toBe(0)
+
+		expect(cache.entries[key]).toBe('hash')
+	})
+})
+
+describe('removeDisabledArtifacts', () => {
+	let directory = ''
+
+	afterEach(async () => {
+		if (directory) {
+			await removeTempDirectory(directory)
+			directory = ''
+		}
+	})
+
+	it('removes artifacts for disabled algorithms only', async () => {
+		directory = await createTempDirectory()
+
+		const artifactDirectory = join(directory, 'artifacts')
+		const key = 'index.html'
+
+		for (const extension of Object.values(ALGORITHM_EXTENSIONS)) {
+			await createFile(artifactDirectory, `${key}${extension}`)
+		}
+
+		await removeDisabledArtifacts(key, artifactDirectory, {
+			gzip: {},
+			brotli: false,
+			zstd: false,
+		})
+
+		expect(await fileExists(getArtifactPath(artifactDirectory, key, '.gz'))).toBe(true)
+
+		expect(await fileExists(getArtifactPath(artifactDirectory, key, '.br'))).toBe(false)
+
+		expect(await fileExists(getArtifactPath(artifactDirectory, key, '.zst'))).toBe(false)
 	})
 })

@@ -1,20 +1,12 @@
 import { createReadStream } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { constants } from 'node:zlib';
 import { styleText } from 'node:util';
 import { CACHE_VERSION } from './constants.js';
 export function getPackageManager() {
-    const userAgent = process.env.npm_config_user_agent || '';
-    if (userAgent.includes('pnpm'))
-        return 'pnpm';
-    if (userAgent.includes('yarn'))
-        return 'yarn';
-    if (userAgent.includes('bun'))
-        return 'bun';
-    if (userAgent.includes('npm'))
-        return 'npm';
-    return 'unknown';
+    const ua = process.env.npm_config_user_agent || '';
+    const [manager] = ua.split('/');
+    return manager;
 }
 export function sha256(value) {
     return createHash('sha256').update(value).digest('hex');
@@ -41,19 +33,21 @@ export function toCacheKey(outputDirectory, filePath) {
     return relative(outputDirectory, filePath).split(sep).join('/');
 }
 export function isInsideDirectory(directory, target) {
-    const resolvedDirectory = resolve(directory);
-    const resolvedTarget = resolve(target);
-    const pathFromDirectory = relative(resolvedDirectory, resolvedTarget);
-    return (pathFromDirectory !== '' &&
-        !pathFromDirectory.startsWith('..') &&
-        !isAbsolute(pathFromDirectory));
+    const relativePath = relative(resolve(directory), resolve(target));
+    return (relativePath !== '' &&
+        relativePath !== '..' &&
+        !relativePath.startsWith(`..${sep}`) &&
+        !isAbsolute(relativePath));
 }
 export function resolveInsideDirectory(directory, relativePath) {
-    const target = resolve(directory, ...relativePath.split('/'));
-    if (!isInsideDirectory(directory, target)) {
+    if (isAbsolute(relativePath)) {
         throw new Error(`Invalid cache path: ${relativePath}`);
     }
-    return target;
+    const resolvedPath = resolve(directory, ...relativePath.split('/'));
+    if (!isInsideDirectory(directory, resolvedPath)) {
+        throw new Error(`Invalid cache path: ${relativePath}`);
+    }
+    return resolvedPath;
 }
 export function formatBytes(bytes) {
     if (bytes < 1024) {
@@ -151,14 +145,31 @@ export function createConfigHash(config, options) {
     return sha256(stableSerialize({
         astroConfig: config,
         compression: {
-            algorithmVersion: CACHE_VERSION,
-            brotliQuality: constants.BROTLI_MAX_QUALITY,
-            gzipLevel: constants.Z_BEST_COMPRESSION,
-            zopfliOptions: options.useZopfli,
-            minSize: options.minSize,
-            fileTypes: options.fileTypes,
+            version: CACHE_VERSION,
             algorithms: options.algorithms,
         },
     }));
+}
+// -----------------------------------------------------------------------------
+// Logging
+// -----------------------------------------------------------------------------
+export function log(logger, options, level, message) {
+    if (options.logLevel < level) {
+        return;
+    }
+    if (level === 2) {
+        logger.debug(message);
+    }
+    else {
+        logger.info(message);
+    }
+}
+export function logError(logger, error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(message);
+}
+export function logHeader(title) {
+    const header = styleText(['bgGreen', 'black'], ` ${title} `);
+    console.log(`\n${header}`);
 }
 //# sourceMappingURL=utils.js.map

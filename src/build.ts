@@ -1,67 +1,61 @@
 import { readdir, stat } from 'node:fs/promises'
 
-import { extname, join, resolve } from 'node:path'
+import { extname, join, relative, resolve, sep } from 'node:path'
 
 import { createHash } from 'node:crypto'
 
 import { performance } from 'node:perf_hooks'
 
-import { PLUGIN_NAME } from './constants.js'
+import { styleText } from 'node:util'
+
+import picomatch from 'picomatch'
+
+import { ALGORITHM_EXTENSIONS, PLUGIN_NAME, SUPPORTED_ALGORITHMS } from './constants.js'
 
 import { loadCache, saveCache, pruneCache, removeDisabledArtifacts } from './cache.js'
 
 import { compressFile } from './compression.js'
 
-import { formatBytes, formatDuration, hashFile, toCacheKey } from './utils.js'
+import {
+	formatBytes,
+	formatDuration,
+	hashFile,
+	log,
+	logError,
+	logHeader,
+	toCacheKey,
+} from './utils.js'
 
 import type {
 	BuildStats,
 	CompressionAlgorithm,
-	IntegrationLogger,
+	FilterOptions,
+	Logger,
 	ResolvedOptions,
 	ZopfliModule,
 } from './types.js'
-
-import { styleText } from 'node:util'
-
-// -----------------------------------------------------------------------------
-// Logging
-// -----------------------------------------------------------------------------
-
-function log(
-	logger: IntegrationLogger,
-	options: ResolvedOptions,
-	level: 1 | 2,
-	message: string,
-): void {
-	if (options.logLevel < level) {
-		return
-	}
-
-	if (level === 2) {
-		logger.debug(message)
-	} else {
-		logger.info(message)
-	}
-}
-
-function logError(logger: IntegrationLogger, error: unknown): void {
-	const message = error instanceof Error ? error.message : String(error)
-	logger.error(message)
-}
-
-function logHeader(title: string): void {
-	const header = styleText(['bgGreen', 'black'], ` ${title} `)
-	console.log(`\n${header}`)
-}
 
 // -----------------------------------------------------------------------------
 // File discovery
 // -----------------------------------------------------------------------------
 
-async function findFiles(directory: string, fileTypes: string[]): Promise<string[]> {
+async function findFiles(
+	directory: string,
+	{ fileTypes, include, exclude }: FilterOptions,
+): Promise<string[]> {
 	const files: string[] = []
-	const supportedExtensions = new Set(fileTypes)
+	const supportedExtensions = new Set(fileTypes.map(extension => extension.toLowerCase()))
+
+	const isIncluded = include?.length ? picomatch(include) : () => true
+	const isExcluded = exclude?.length ? picomatch(exclude) : () => false
+
+	function isExcludedDirectory(relativePath: string): boolean {
+		return (
+			isExcluded(relativePath) ||
+			isExcluded(`${relativePath}/`) ||
+			isExcluded(`${relativePath}/__astro_precompressor_probe__`)
+		)
+	}
 
 	async function walk(currentDirectory: string): Promise<void> {
 		const entries = await readdir(currentDirectory, {
@@ -69,7 +63,8 @@ async function findFiles(directory: string, fileTypes: string[]): Promise<string
 		})
 
 		for (const entry of entries) {
-			const fullPath = join(currentDirectory, entry.name)
+			const absolutePath = join(currentDirectory, entry.name)
+			const relativePath = relative(directory, absolutePath).split(sep).join('/')
 
 			// Do not follow symbolic links.
 			if (entry.isSymbolicLink()) {
@@ -77,7 +72,11 @@ async function findFiles(directory: string, fileTypes: string[]): Promise<string
 			}
 
 			if (entry.isDirectory()) {
-				await walk(fullPath)
+				if (isExcludedDirectory(relativePath)) {
+					continue
+				}
+
+				await walk(absolutePath)
 				continue
 			}
 
@@ -87,9 +86,15 @@ async function findFiles(directory: string, fileTypes: string[]): Promise<string
 
 			const extension = extname(entry.name).toLowerCase()
 
-			if (supportedExtensions.has(extension)) {
-				files.push(fullPath)
+			if (!supportedExtensions.has(extension)) {
+				continue
 			}
+
+			if (isExcluded(relativePath) || !isIncluded(relativePath)) {
+				continue
+			}
+
+			files.push(absolutePath)
 		}
 	}
 
@@ -102,9 +107,9 @@ async function findFiles(directory: string, fileTypes: string[]): Promise<string
 // Statistics
 // -----------------------------------------------------------------------------
 
-function createBuildStats(files: number): BuildStats {
+function createBuildStats(eligibleFileCount: number): BuildStats {
 	return {
-		files,
+		files: eligibleFileCount,
 		reusedFiles: 0,
 		regeneratedFiles: 0,
 		sourceBytes: 0,
@@ -114,11 +119,19 @@ function createBuildStats(files: number): BuildStats {
 				generated: 0,
 				bytes: 0,
 				elapsed: 0,
+				discarded: 0,
 			},
 			gzip: {
 				generated: 0,
 				bytes: 0,
 				elapsed: 0,
+				discarded: 0,
+			},
+			zstd: {
+				generated: 0,
+				bytes: 0,
+				elapsed: 0,
+				discarded: 0,
 			},
 		},
 		errors: [],
@@ -126,7 +139,7 @@ function createBuildStats(files: number): BuildStats {
 }
 
 function logFileResult(
-	logger: IntegrationLogger,
+	logger: Logger,
 	options: ResolvedOptions,
 	filePath: string,
 	sourceSize: number,
@@ -138,12 +151,7 @@ function logFileResult(
 	}[],
 ): void {
 	for (const result of compressions) {
-		const fileExtension = (
-			{
-				brotli: 'br',
-				gzip: 'gz',
-			} as const
-		)[result.algorithm]
+		const extension = ALGORITHM_EXTENSIONS[result.algorithm]
 		const savings = sourceSize > 0 ? ((1 - result.size / sourceSize) * 100).toFixed(1) : '0.0'
 
 		const status = result.generated
@@ -154,13 +162,13 @@ function logFileResult(
 			logger.fork(''),
 			options,
 			1,
-			`  ${styleText('green', '▶')} ${filePath}.${fileExtension} ${styleText('dim', status)}`,
+			`  ${styleText('green', '▶')} ${filePath}${extension} ${styleText('dim', status)}`,
 		)
 	}
 }
 
-function logStatistics(logger: IntegrationLogger, stats: BuildStats): void {
-	for (const algorithm of ['brotli', 'gzip'] as const) {
+function logStatistics(logger: Logger, stats: BuildStats): void {
+	for (const algorithm of SUPPORTED_ALGORITHMS) {
 		const result = stats.algorithms[algorithm]
 
 		if (result.generated === 0 && result.bytes === 0) {
@@ -171,7 +179,7 @@ function logStatistics(logger: IntegrationLogger, stats: BuildStats): void {
 			stats.sourceBytes > 0 ? ((1 - result.bytes / stats.sourceBytes) * 100).toFixed(1) : '0.0'
 
 		logger.info(
-			`${algorithm === 'brotli' ? 'Brotli' : 'Gzip'}: ${result.generated} generated | ${formatBytes(result.bytes)} (-${savings}%) | ${formatDuration(result.elapsed)} combined processing time`,
+			`${algorithm}: ${result.generated} generated | ${formatBytes(result.bytes)} (-${savings}%) | ${formatDuration(result.elapsed)} combined processing time`,
 		)
 	}
 
@@ -191,7 +199,7 @@ export async function runBuild(
 	cacheDirectory: string,
 	configHash: string,
 	options: ResolvedOptions,
-	logger: IntegrationLogger,
+	logger: Logger,
 	zopfli: ZopfliModule | undefined,
 ): Promise<void> {
 	const buildStart = performance.now()
@@ -212,13 +220,13 @@ export async function runBuild(
 
 	const configChanged = options.recompressOnConfigChange && cache.configHash !== configHash
 
-	const forceRecompress = !options.incremental || configChanged
+	const forceRecompress = !options.performance.incremental || configChanged
 
 	// -------------------------------------------------------------------------
 	// Discover eligible files
 	// -------------------------------------------------------------------------
 
-	const files = await findFiles(outputDirectory, options.fileTypes)
+	const files = await findFiles(outputDirectory, options.filters)
 
 	const eligibleFiles: Array<{
 		path: string
@@ -231,7 +239,7 @@ export async function runBuild(
 	for (const filePath of files) {
 		const fileStats = await stat(filePath)
 
-		if (fileStats.size < options.minSize) {
+		if (fileStats.size < options.filters.minSize) {
 			continue
 		}
 
@@ -246,13 +254,21 @@ export async function runBuild(
 		currentKeys.add(key)
 	}
 
-	log(logger, options, 2, `Processing ${eligibleFiles.length} build files`)
+	const enabledAlgorithms = Object.entries(options.algorithms)
+		.filter(([, value]) => value)
+		.map(([algorithm]) => algorithm)
+
+	if (options.logLevel === 0) {
+		logger.info(`Processing ${eligibleFiles.length} eligible files`)
+	} else {
+		log(logger, options, 2, `Processing ${eligibleFiles.length} eligible files`)
+	}
 	log(logger, options, 2, `Output directory: ${outputDirectory}`)
 	log(logger, options, 2, `Manifest: ${manifestPath}`)
 	log(logger, options, 2, `Artifact cache: ${artifactDirectory}`)
-	log(logger, options, 2, `Algorithms: ${options.algorithms.join(', ')}`)
-	log(logger, options, 2, `File types: ${options.fileTypes.join(' ') || '(none)'}`)
-	log(logger, options, 2, `Incremental: ${options.incremental}`)
+	log(logger, options, 2, `Algorithms: ${enabledAlgorithms.join(', ')}`)
+	log(logger, options, 2, `File types: ${options.filters.fileTypes.join(' ')}`)
+	log(logger, options, 2, `Incremental: ${options.performance.incremental}`)
 	log(logger, options, 2, `Configuration changed: ${configChanged}`)
 	log(logger, options, 2, `Force recompression: ${forceRecompress}`)
 
@@ -266,24 +282,22 @@ export async function runBuild(
 	// Prune cache
 	// -------------------------------------------------------------------------
 
-	if (options.prune) {
+	if (options.filters.pruneCache) {
 		try {
-			const removed = await pruneCache(cache, artifactDirectory, outputDirectory, currentKeys)
+			const removed = await pruneCache(cache, artifactDirectory, currentKeys)
 
 			if (removed > 0) {
 				logger.info(`Pruned ${removed} stale cache entr${removed === 1 ? 'y' : 'ies'}.`)
 			}
-
-			const algorithms = new Set(options.algorithms)
-
-			// Remove sidecars belonging to algorithms that are no
-			// longer configured.
-			for (const file of eligibleFiles) {
-				await removeDisabledArtifacts(file.key, artifactDirectory, file.path, algorithms)
-			}
 		} catch (error) {
 			stats.errors.push(error instanceof Error ? error : new Error(String(error)))
 		}
+	}
+
+	// Remove sidecars belonging to algorithms that are no
+	// longer configured.
+	for (const file of eligibleFiles) {
+		await removeDisabledArtifacts(file.key, artifactDirectory, options.algorithms)
 	}
 
 	// -------------------------------------------------------------------------
@@ -346,6 +360,10 @@ export async function runBuild(
 					if (compression.generated) {
 						algorithmStats.generated++
 					}
+
+					if (compression.discarded) {
+						algorithmStats.discarded++
+					}
 				}
 			} catch (error) {
 				const normalizedError = error instanceof Error ? error : new Error(String(error))
@@ -359,7 +377,15 @@ export async function runBuild(
 		}
 	}
 
-	const workerCount = Math.min(options.concurrency, eligibleFiles.length)
+	// Set concurrency based on available threads and number of algorithms
+	const algorithmCount = enabledAlgorithms.length
+	if (!algorithmCount) {
+		throw new Error('There are no eligible algorithms selected.')
+	}
+	const workerCount = Math.min(
+		eligibleFiles.length,
+		Math.max(1, Math.floor(options.performance.concurrency / algorithmCount)),
+	)
 
 	if (options.logLevel > 0) {
 		logHeader('generating precompressed files')
@@ -370,7 +396,7 @@ export async function runBuild(
 	// Save cache
 	// -------------------------------------------------------------------------
 
-	if (stats.errors.length === 0) {
+	if (stats.errors.length === 0 && options.recompressOnConfigChange) {
 		cache.configHash = configHash
 	}
 
@@ -401,8 +427,13 @@ export async function runBuild(
 		0,
 	)
 
+	const totalDiscarded = Object.values(stats.algorithms).reduce(
+		(total, algorithm) => total + algorithm.discarded,
+		0,
+	)
+
 	logger.info(
-		`Reused: ${stats.reusedFiles} | Generated: ${totalGenerated} | Updated: ${stats.regeneratedFiles}`,
+		`Reused: ${stats.reusedFiles} | Updated: ${stats.regeneratedFiles} | Generated: ${totalGenerated} (${totalDiscarded} discarded)`,
 	)
 
 	if (options.logLevel >= 1) {

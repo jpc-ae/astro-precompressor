@@ -1,192 +1,498 @@
-import { brotliDecompressSync, gunzipSync } from 'node:zlib'
+import { mkdir, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { CompressionAlgorithm, CompressionResult } from '../src/types.js'
+
+import { compressFile } from '../src/compression.js'
+import { runBuild } from '../src/build.js'
 
 import {
-	createTestEnvironment,
-	createTestFile,
-	createTestLogger,
-	readTestFile,
-	removeTestDirectory,
-	runIntegration,
-} from './helpers'
+	createFile,
+	createLogger,
+	createOptions,
+	createTempDirectory,
+	removeTempDirectory,
+} from './helpers.js'
 
-import type { TestEnvironment } from './helpers'
+vi.mock('../src/compression.js', () => ({
+	compressFile: vi.fn(),
+}))
 
-describe('build operation', () => {
-	let environment: TestEnvironment
+const mockedCompressFile = vi.mocked(compressFile)
 
-	beforeEach(async () => {
-		environment = await createTestEnvironment()
+describe('runBuild', () => {
+	let directory = ''
+	let outputDirectory = ''
+	let cacheDirectory = ''
+
+	beforeEach(() => {
+		mockedCompressFile.mockReset()
+
+		mockedCompressFile.mockImplementation(async (...args) => {
+			const options = args[6]
+
+			const compressions: CompressionResult[] = []
+
+			for (const [algorithm, enabled] of Object.entries(options.algorithms)) {
+				if (!enabled) {
+					continue
+				}
+
+				compressions.push({
+					algorithm: algorithm as CompressionAlgorithm,
+					elapsed: 1,
+					generated: true,
+					size: 10,
+					discarded: false,
+				})
+			}
+
+			return {
+				elapsed: 1,
+				compressions,
+			}
+		})
 	})
 
 	afterEach(async () => {
-		await removeTestDirectory(environment.root)
+		if (directory) {
+			await removeTempDirectory(directory)
+			directory = ''
+		}
 	})
 
-	describe('file discovery', () => {
-		it('compresses only the configured extensions', async () => {
-			await createTestFile(environment.outputDirectory, 'index.html', 'HTML content')
+	async function setup(): Promise<void> {
+		directory = await createTempDirectory()
 
-			await createTestFile(environment.outputDirectory, 'styles.css', 'CSS content')
+		outputDirectory = join(directory, 'dist')
+		cacheDirectory = join(directory, 'cache')
 
-			await createTestFile(environment.outputDirectory, 'image.png', 'PNG content')
+		await mkdir(outputDirectory, { recursive: true })
+	}
 
-			await runIntegration(environment, {
-				fileTypes: ['html'],
-			})
+	it('processes eligible files', async () => {
+		await setup()
 
-			await expect(
-				readTestFile(`${environment.outputDirectory}/index.html.br`),
-			).resolves.toBeInstanceOf(Buffer)
+		await createFile(outputDirectory, 'index.html', 'index content')
+		await createFile(outputDirectory, 'about.html', 'about content')
 
-			await expect(readTestFile(`${environment.outputDirectory}/styles.css.br`)).rejects.toThrow()
+		const logger = createLogger()
 
-			await expect(readTestFile(`${environment.outputDirectory}/image.png.br`)).rejects.toThrow()
-		})
+		await runBuild(
+			outputDirectory,
+			cacheDirectory,
+			'config-hash',
+			createOptions(),
+			logger,
+			undefined,
+		)
 
-		it('normalizes file extensions without dots', async () => {
-			await createTestFile(environment.outputDirectory, 'index.html', 'HTML content')
-
-			await createTestFile(environment.outputDirectory, 'styles.css', 'CSS content')
-
-			await runIntegration(environment, {
-				fileTypes: ['HTML'],
-			})
-
-			await expect(
-				readTestFile(`${environment.outputDirectory}/index.html.br`),
-			).resolves.toBeInstanceOf(Buffer)
-
-			await expect(readTestFile(`${environment.outputDirectory}/styles.css.br`)).rejects.toThrow()
-		})
-
-		it('discovers files in nested directories', async () => {
-			await createTestFile(
-				environment.outputDirectory,
-				'assets/css/styles.css',
-				'Nested CSS content',
-			)
-
-			await runIntegration(environment)
-
-			const compressed = await readTestFile(
-				`${environment.outputDirectory}/assets/css/styles.css.br`,
-			)
-
-			expect(brotliDecompressSync(compressed).toString()).toBe('Nested CSS content')
-		})
-
-		it('does not compress files when fileTypes is empty', async () => {
-			await createTestFile(environment.outputDirectory, 'index.html', 'HTML content')
-
-			const logger = await runIntegration(environment, {
-				fileTypes: [],
-				logLevel: 1,
-			})
-
-			await expect(readTestFile(`${environment.outputDirectory}/index.html.br`)).rejects.toThrow()
-
-			expect(
-				logger.info.mock.calls.some(([message]) => String(message).includes('Reused: 0')),
-			).toBe(true)
-		})
+		expect(mockedCompressFile).toHaveBeenCalledTimes(2)
+		expect(logger.info).toHaveBeenCalled()
 	})
 
-	describe('minimum file size', () => {
-		it('compresses files meeting the minimum size', async () => {
-			await createTestFile(environment.outputDirectory, 'large.html', '1234567890')
+	it('ignores unsupported file extensions', async () => {
+		await setup()
 
-			await runIntegration(environment, {
-				minSize: 10,
-			})
+		await createFile(outputDirectory, 'index.html')
+		await createFile(outputDirectory, 'image.png')
 
-			await expect(
-				readTestFile(`${environment.outputDirectory}/large.html.br`),
-			).resolves.toBeInstanceOf(Buffer)
-		})
+		await runBuild(
+			outputDirectory,
+			cacheDirectory,
+			'config-hash',
+			createOptions(),
+			createLogger(),
+			undefined,
+		)
 
-		it('skips files smaller than the minimum size', async () => {
-			await createTestFile(environment.outputDirectory, 'small.html', '123456789')
-
-			await runIntegration(environment, {
-				minSize: 10,
-			})
-
-			await expect(readTestFile(`${environment.outputDirectory}/small.html.br`)).rejects.toThrow()
-		})
+		expect(mockedCompressFile).toHaveBeenCalledTimes(1)
+		expect(mockedCompressFile.mock.calls[0][0]).toContain('index.html')
 	})
 
-	describe('concurrency', () => {
-		it('processes multiple files successfully', async () => {
-			const files = Array.from({ length: 20 }, (_, index) => `file-${index}.html`)
+	it('respects the minimum file size', async () => {
+		await setup()
 
-			for (const file of files) {
-				await createTestFile(environment.outputDirectory, file, `Contents of ${file}`)
-			}
+		await createFile(outputDirectory, 'small.html', 'x')
+		await createFile(outputDirectory, 'large.html', 'this is large enough')
 
-			await runIntegration(environment, {
+		await runBuild(
+			outputDirectory,
+			cacheDirectory,
+			'config-hash',
+			createOptions({
+				filters: {
+					minSize: 5,
+					fileTypes: ['.html'],
+					include: undefined,
+					exclude: undefined,
+					pruneCache: true,
+				},
+			}),
+			createLogger(),
+			undefined,
+		)
+
+		expect(mockedCompressFile).toHaveBeenCalledTimes(1)
+		expect(mockedCompressFile.mock.calls[0][0]).toContain('large.html')
+	})
+
+	it('respects include patterns', async () => {
+		await setup()
+
+		await createFile(outputDirectory, 'index.html')
+		await createFile(outputDirectory, 'pages/about.html')
+		await createFile(outputDirectory, 'pages/contact.html')
+
+		await runBuild(
+			outputDirectory,
+			cacheDirectory,
+			'config-hash',
+			createOptions({
+				filters: {
+					minSize: 1,
+					fileTypes: ['.html'],
+					include: ['pages/**'],
+					exclude: undefined,
+					pruneCache: true,
+				},
+			}),
+			createLogger(),
+			undefined,
+		)
+
+		expect(mockedCompressFile).toHaveBeenCalledTimes(2)
+		expect(mockedCompressFile.mock.calls.map(call => call[2]).sort()).toEqual([
+			'pages/about.html',
+			'pages/contact.html',
+		])
+	})
+
+	it('excludes matching files', async () => {
+		await setup()
+
+		await createFile(outputDirectory, 'index.html')
+		await createFile(outputDirectory, 'private.html')
+		await createFile(outputDirectory, 'pages/about.html')
+
+		await runBuild(
+			outputDirectory,
+			cacheDirectory,
+			'config-hash',
+			createOptions({
+				filters: {
+					minSize: 1,
+					fileTypes: ['.html'],
+					include: undefined,
+					exclude: ['private.html'],
+					pruneCache: true,
+				},
+			}),
+			createLogger(),
+			undefined,
+		)
+
+		expect(mockedCompressFile).toHaveBeenCalledTimes(2)
+		expect(mockedCompressFile.mock.calls.map(call => call[2])).not.toContain('private.html')
+	})
+
+	it('skips excluded directories using directory glob patterns', async () => {
+		await setup()
+
+		await createFile(outputDirectory, 'index.html')
+		await createFile(outputDirectory, 'ignored/one.html')
+		await createFile(outputDirectory, 'nested/ignored/two.html')
+		await createFile(outputDirectory, 'pages/about.html')
+
+		await runBuild(
+			outputDirectory,
+			cacheDirectory,
+			'config-hash',
+			createOptions({
+				filters: {
+					minSize: 1,
+					fileTypes: ['.html'],
+					include: undefined,
+					exclude: ['**/ignored/**'],
+					pruneCache: true,
+				},
+			}),
+			createLogger(),
+			undefined,
+		)
+
+		expect(mockedCompressFile.mock.calls.map(call => call[2]).sort()).toEqual([
+			'index.html',
+			'pages/about.html',
+		])
+	})
+
+	it('does not follow symbolic links', async () => {
+		await setup()
+
+		const outsideDirectory = join(directory, 'outside')
+		await mkdir(outsideDirectory)
+
+		await createFile(outsideDirectory, 'linked.html')
+		await createFile(outputDirectory, 'index.html')
+
+		const { symlink } = await import('node:fs/promises')
+
+		await symlink(outsideDirectory, join(outputDirectory, 'linked-directory'), 'dir')
+
+		await runBuild(
+			outputDirectory,
+			cacheDirectory,
+			'config-hash',
+			createOptions(),
+			createLogger(),
+			undefined,
+		)
+
+		expect(mockedCompressFile).toHaveBeenCalledTimes(1)
+	})
+
+	it('reuses cached files on an incremental build', async () => {
+		await setup()
+
+		await createFile(outputDirectory, 'index.html')
+
+		const logger = createLogger()
+		const options = createOptions()
+
+		await runBuild(outputDirectory, cacheDirectory, 'config-hash', options, logger, undefined)
+
+		mockedCompressFile.mockClear()
+
+		await runBuild(outputDirectory, cacheDirectory, 'config-hash', options, logger, undefined)
+
+		expect(mockedCompressFile).toHaveBeenCalledTimes(1)
+
+		const call = mockedCompressFile.mock.calls[0]
+
+		expect(call[4]).toBeDefined()
+		expect(call[5]).toBe(false)
+	})
+
+	it('forces recompression when incremental mode is disabled', async () => {
+		await setup()
+
+		await createFile(outputDirectory, 'index.html')
+
+		const options = createOptions({
+			performance: {
 				concurrency: 2,
-			})
+				incremental: false,
+				discardCompressionIfLarger: false,
+			},
+		})
 
-			for (const file of files) {
-				const source = await readTestFile(`${environment.outputDirectory}/${file}`)
+		await runBuild(
+			outputDirectory,
+			cacheDirectory,
+			'config-hash',
+			options,
+			createLogger(),
+			undefined,
+		)
 
-				const br = await readTestFile(`${environment.outputDirectory}/${file}.br`)
+		mockedCompressFile.mockClear()
 
-				const gz = await readTestFile(`${environment.outputDirectory}/${file}.gz`)
+		await runBuild(
+			outputDirectory,
+			cacheDirectory,
+			'config-hash',
+			options,
+			createLogger(),
+			undefined,
+		)
 
-				expect(brotliDecompressSync(br)).toEqual(source)
+		expect(mockedCompressFile.mock.calls[0][5]).toBe(true)
+	})
 
-				expect(gunzipSync(gz)).toEqual(source)
+	it('forces recompression when the configuration hash changes and the option is enabled', async () => {
+		await setup()
+
+		await createFile(outputDirectory, 'index.html')
+
+		const options = createOptions({
+			recompressOnConfigChange: true,
+		})
+
+		await runBuild(outputDirectory, cacheDirectory, 'config-a', options, createLogger(), undefined)
+
+		mockedCompressFile.mockClear()
+
+		await runBuild(outputDirectory, cacheDirectory, 'config-b', options, createLogger(), undefined)
+
+		expect(mockedCompressFile.mock.calls[0][5]).toBe(true)
+	})
+
+	it('does not update the cache entry when compression fails', async () => {
+		await setup()
+
+		await createFile(outputDirectory, 'index.html')
+
+		mockedCompressFile.mockRejectedValueOnce(new Error('compression failed'))
+
+		await runBuild(
+			outputDirectory,
+			cacheDirectory,
+			'config-hash',
+			createOptions(),
+			createLogger(),
+			undefined,
+		)
+
+		const manifests = await readFile(
+			join(
+				cacheDirectory,
+				'astro-precompressor',
+				`${(await import('node:crypto')).createHash('sha256').update(outputDirectory).digest('hex')}.json`,
+			),
+			'utf8',
+		)
+
+		expect(JSON.parse(manifests).entries).toEqual({})
+	})
+
+	it('throws after processing errors when failOnError is enabled', async () => {
+		await setup()
+
+		await createFile(outputDirectory, 'index.html')
+
+		mockedCompressFile.mockRejectedValueOnce(new Error('compression failed'))
+
+		await expect(
+			runBuild(
+				outputDirectory,
+				cacheDirectory,
+				'config-hash',
+				createOptions({
+					failOnError: true,
+				}),
+				createLogger(),
+				undefined,
+			),
+		).rejects.toThrow('Compression failed for 1 operation(s).')
+	})
+
+	it('continues processing other files after one file fails', async () => {
+		await setup()
+
+		await createFile(outputDirectory, 'one.html')
+		await createFile(outputDirectory, 'two.html')
+
+		mockedCompressFile.mockRejectedValueOnce(new Error('first file failed')).mockResolvedValueOnce({
+			elapsed: 1,
+			compressions: [
+				{
+					algorithm: 'gzip',
+					elapsed: 1,
+					generated: true,
+					size: 10,
+					discarded: false,
+				},
+			],
+		})
+
+		await runBuild(
+			outputDirectory,
+			cacheDirectory,
+			'config-hash',
+			createOptions({
+				performance: {
+					concurrency: 1,
+					incremental: true,
+					discardCompressionIfLarger: false,
+				},
+			}),
+			createLogger(),
+			undefined,
+		)
+
+		expect(mockedCompressFile).toHaveBeenCalledTimes(2)
+	})
+
+	it('limits concurrent file workers according to configured concurrency and algorithm count', async () => {
+		await setup()
+
+		for (let index = 0; index < 8; index++) {
+			await createFile(outputDirectory, `${index}.html`)
+		}
+
+		let active = 0
+		let peak = 0
+
+		mockedCompressFile.mockImplementation(async () => {
+			active++
+			peak = Math.max(peak, active)
+
+			await new Promise(resolve => setTimeout(resolve, 10))
+
+			active--
+
+			return {
+				elapsed: 1,
+				compressions: [
+					{
+						algorithm: 'gzip',
+						elapsed: 1,
+						generated: true,
+						size: 10,
+						discarded: false,
+					},
+					{
+						algorithm: 'brotli',
+						elapsed: 1,
+						generated: true,
+						size: 8,
+						discarded: false,
+					},
+				],
 			}
 		})
 
-		it('works with concurrency greater than the file count', async () => {
-			await createTestFile(environment.outputDirectory, 'index.html', 'Test content')
+		await runBuild(
+			outputDirectory,
+			cacheDirectory,
+			'config-hash',
+			createOptions({
+				algorithms: {
+					gzip: {},
+					brotli: {},
+					zstd: false,
+				},
+				performance: {
+					concurrency: 4,
+					incremental: true,
+					discardCompressionIfLarger: false,
+				},
+			}),
+			createLogger(),
+			undefined,
+		)
 
-			await expect(
-				runIntegration(environment, {
-					concurrency: 10,
-				}),
-			).resolves.toBeDefined()
-		})
+		// 4 total compression slots / 2 algorithms = 2 file workers.
+		expect(peak).toBe(2)
 	})
 
-	describe('logging', () => {
-		it('logs a summary at log level 0', async () => {
-			await createTestFile(environment.outputDirectory, 'index.html', 'Test content')
+	it('handles an empty output directory', async () => {
+		await setup()
 
-			const logger = await runIntegration(environment, {
-				logLevel: 0,
-			})
+		await expect(
+			runBuild(
+				outputDirectory,
+				cacheDirectory,
+				'config-hash',
+				createOptions(),
+				createLogger(),
+				undefined,
+			),
+		).resolves.toBeUndefined()
 
-			expect(logger.info).toHaveBeenCalled()
-		})
-
-		it('logs per-file statistics at log level 1', async () => {
-			await createTestFile(environment.outputDirectory, 'index.html', 'Test content')
-
-			const forkedLogger = createTestLogger()
-			environment.logger.fork.mockReturnValue(forkedLogger)
-
-			await runIntegration(environment, {
-				logLevel: 1,
-			})
-
-			expect(
-				forkedLogger.info.mock.calls.some(([message]) => String(message).includes('index.html.br')),
-			).toBe(true)
-		})
-
-		it('logs processing details at log level 2', async () => {
-			await createTestFile(environment.outputDirectory, 'index.html', 'Test content')
-
-			const logger = await runIntegration(environment, {
-				logLevel: 2,
-			})
-
-			expect(logger.debug).toHaveBeenCalled()
-		})
+		expect(mockedCompressFile).not.toHaveBeenCalled()
 	})
 })

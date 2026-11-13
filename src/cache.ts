@@ -4,11 +4,11 @@ import { randomUUID } from 'node:crypto'
 
 import { dirname } from 'node:path'
 
-import { CACHE_VERSION } from './constants.js'
+import { ALGORITHM_EXTENSIONS, CACHE_VERSION } from './constants.js'
 
 import { resolveInsideDirectory } from './utils.js'
 
-import type { CacheManifest } from './types.js'
+import type { CacheManifest, ResolvedAlgorithmOptions } from './types.js'
 
 // -----------------------------------------------------------------------------
 // Manifest
@@ -30,8 +30,9 @@ export async function loadCache(manifestPath: string): Promise<CacheManifest> {
 
 		if (
 			parsed.version !== CACHE_VERSION ||
+			!parsed.entries ||
 			typeof parsed.entries !== 'object' ||
-			parsed.entries === null
+			Array.isArray(parsed.entries)
 		) {
 			return emptyCache()
 		}
@@ -78,11 +79,11 @@ export async function saveCache(manifestPath: string, cache: CacheManifest): Pro
 export function getArtifactPath(
 	artifactDirectory: string,
 	relativePath: string,
-	extension: 'br' | 'gz',
+	extension: (typeof ALGORITHM_EXTENSIONS)[keyof typeof ALGORITHM_EXTENSIONS],
 ): string {
 	const target = resolveInsideDirectory(artifactDirectory, relativePath)
 
-	return `${target}.${extension}`
+	return `${target}${extension}`
 }
 
 // -----------------------------------------------------------------------------
@@ -101,17 +102,9 @@ export async function fileExists(path: string): Promise<boolean> {
 export async function copyPreservingTimestamps(source: string, destination: string): Promise<void> {
 	const sourceStats = await stat(source)
 
-	try {
-		await mkdir(dirname(destination), {
-			recursive: true,
-		})
-
-		await copyFile(source, destination)
-
-		await utimes(destination, sourceStats.atime, sourceStats.mtime)
-	} finally {
-		await utimes(source, sourceStats.atime, sourceStats.mtime).catch(() => {})
-	}
+	await mkdir(dirname(destination), { recursive: true })
+	await copyFile(source, destination)
+	await utimes(destination, sourceStats.atime, sourceStats.mtime)
 }
 
 // -----------------------------------------------------------------------------
@@ -121,7 +114,6 @@ export async function copyPreservingTimestamps(source: string, destination: stri
 export async function pruneCache(
 	cache: CacheManifest,
 	artifactDirectory: string,
-	outputDirectory: string,
 	currentKeys: Set<string>,
 ): Promise<number> {
 	const retainedEntries: Record<string, string> = {}
@@ -134,17 +126,10 @@ export async function pruneCache(
 			continue
 		}
 
-		const brCachePath = getArtifactPath(artifactDirectory, key, 'br')
-
-		const gzCachePath = getArtifactPath(artifactDirectory, key, 'gz')
-
-		const sourcePath = resolveInsideDirectory(outputDirectory, key)
-
-		await rm(brCachePath, { force: true })
-		await rm(gzCachePath, { force: true })
-
-		await rm(`${sourcePath}.br`, { force: true })
-		await rm(`${sourcePath}.gz`, { force: true })
+		for (const extension of Object.values(ALGORITHM_EXTENSIONS)) {
+			const cachePath = getArtifactPath(artifactDirectory, key, extension)
+			await rm(cachePath, { force: true })
+		}
 
 		removed++
 	}
@@ -161,18 +146,12 @@ export async function pruneCache(
 export async function removeDisabledArtifacts(
 	relativePath: string,
 	artifactDirectory: string,
-	sourcePath: string,
-	algorithms: Set<'brotli' | 'gzip'>,
+	algorithms: ResolvedAlgorithmOptions,
 ): Promise<void> {
-	if (!algorithms.has('brotli')) {
-		await rm(getArtifactPath(artifactDirectory, relativePath, 'br'), { force: true })
-
-		await rm(`${sourcePath}.br`, { force: true })
-	}
-
-	if (!algorithms.has('gzip')) {
-		await rm(getArtifactPath(artifactDirectory, relativePath, 'gz'), { force: true })
-
-		await rm(`${sourcePath}.gz`, { force: true })
+	for (const [algorithm, extension] of Object.entries(ALGORITHM_EXTENSIONS)) {
+		const typedAlgorithm = algorithm as keyof typeof ALGORITHM_EXTENSIONS
+		if (!algorithms[typedAlgorithm]) {
+			await rm(getArtifactPath(artifactDirectory, relativePath, extension), { force: true })
+		}
 	}
 }

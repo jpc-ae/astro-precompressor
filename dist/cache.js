@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
-import { CACHE_VERSION } from './constants.js';
+import { ALGORITHM_EXTENSIONS, CACHE_VERSION } from './constants.js';
 import { resolveInsideDirectory } from './utils.js';
 // -----------------------------------------------------------------------------
 // Manifest
@@ -18,8 +18,9 @@ export async function loadCache(manifestPath) {
         const contents = await readFile(manifestPath, 'utf8');
         const parsed = JSON.parse(contents);
         if (parsed.version !== CACHE_VERSION ||
+            !parsed.entries ||
             typeof parsed.entries !== 'object' ||
-            parsed.entries === null) {
+            Array.isArray(parsed.entries)) {
             return emptyCache();
         }
         const entries = {};
@@ -57,7 +58,7 @@ export async function saveCache(manifestPath, cache) {
 // -----------------------------------------------------------------------------
 export function getArtifactPath(artifactDirectory, relativePath, extension) {
     const target = resolveInsideDirectory(artifactDirectory, relativePath);
-    return `${target}.${extension}`;
+    return `${target}${extension}`;
 }
 // -----------------------------------------------------------------------------
 // File utilities
@@ -73,21 +74,14 @@ export async function fileExists(path) {
 }
 export async function copyPreservingTimestamps(source, destination) {
     const sourceStats = await stat(source);
-    try {
-        await mkdir(dirname(destination), {
-            recursive: true,
-        });
-        await copyFile(source, destination);
-        await utimes(destination, sourceStats.atime, sourceStats.mtime);
-    }
-    finally {
-        await utimes(source, sourceStats.atime, sourceStats.mtime).catch(() => { });
-    }
+    await mkdir(dirname(destination), { recursive: true });
+    await copyFile(source, destination);
+    await utimes(destination, sourceStats.atime, sourceStats.mtime);
 }
 // -----------------------------------------------------------------------------
 // Pruning
 // -----------------------------------------------------------------------------
-export async function pruneCache(cache, artifactDirectory, outputDirectory, currentKeys) {
+export async function pruneCache(cache, artifactDirectory, currentKeys) {
     const retainedEntries = {};
     let removed = 0;
     for (const [key, hash] of Object.entries(cache.entries)) {
@@ -95,13 +89,10 @@ export async function pruneCache(cache, artifactDirectory, outputDirectory, curr
             retainedEntries[key] = hash;
             continue;
         }
-        const brCachePath = getArtifactPath(artifactDirectory, key, 'br');
-        const gzCachePath = getArtifactPath(artifactDirectory, key, 'gz');
-        const sourcePath = resolveInsideDirectory(outputDirectory, key);
-        await rm(brCachePath, { force: true });
-        await rm(gzCachePath, { force: true });
-        await rm(`${sourcePath}.br`, { force: true });
-        await rm(`${sourcePath}.gz`, { force: true });
+        for (const extension of Object.values(ALGORITHM_EXTENSIONS)) {
+            const cachePath = getArtifactPath(artifactDirectory, key, extension);
+            await rm(cachePath, { force: true });
+        }
         removed++;
     }
     cache.entries = retainedEntries;
@@ -110,14 +101,12 @@ export async function pruneCache(cache, artifactDirectory, outputDirectory, curr
 // -----------------------------------------------------------------------------
 // Remove disabled algorithms
 // -----------------------------------------------------------------------------
-export async function removeDisabledArtifacts(relativePath, artifactDirectory, sourcePath, algorithms) {
-    if (!algorithms.has('brotli')) {
-        await rm(getArtifactPath(artifactDirectory, relativePath, 'br'), { force: true });
-        await rm(`${sourcePath}.br`, { force: true });
-    }
-    if (!algorithms.has('gzip')) {
-        await rm(getArtifactPath(artifactDirectory, relativePath, 'gz'), { force: true });
-        await rm(`${sourcePath}.gz`, { force: true });
+export async function removeDisabledArtifacts(relativePath, artifactDirectory, algorithms) {
+    for (const [algorithm, extension] of Object.entries(ALGORITHM_EXTENSIONS)) {
+        const typedAlgorithm = algorithm;
+        if (!algorithms[typedAlgorithm]) {
+            await rm(getArtifactPath(artifactDirectory, relativePath, extension), { force: true });
+        }
     }
 }
 //# sourceMappingURL=cache.js.map

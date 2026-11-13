@@ -4,23 +4,16 @@ import { createHash } from 'node:crypto'
 
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 
-import { constants } from 'node:zlib'
-
 import { styleText } from 'node:util'
 
 import { CACHE_VERSION } from './constants.js'
 
-import type { ResolvedOptions } from './types.js'
+import type { Logger, ResolvedOptions } from './types.js'
 
 export function getPackageManager(): string {
-	const userAgent = process.env.npm_config_user_agent || ''
-
-	if (userAgent.includes('pnpm')) return 'pnpm'
-	if (userAgent.includes('yarn')) return 'yarn'
-	if (userAgent.includes('bun')) return 'bun'
-	if (userAgent.includes('npm')) return 'npm'
-
-	return 'unknown'
+	const ua = process.env.npm_config_user_agent || ''
+	const [manager] = ua.split('/')
+	return manager
 }
 
 export function sha256(value: string): string {
@@ -58,26 +51,28 @@ export function toCacheKey(outputDirectory: string, filePath: string): string {
 }
 
 export function isInsideDirectory(directory: string, target: string): boolean {
-	const resolvedDirectory = resolve(directory)
-	const resolvedTarget = resolve(target)
-
-	const pathFromDirectory = relative(resolvedDirectory, resolvedTarget)
+	const relativePath = relative(resolve(directory), resolve(target))
 
 	return (
-		pathFromDirectory !== '' &&
-		!pathFromDirectory.startsWith('..') &&
-		!isAbsolute(pathFromDirectory)
+		relativePath !== '' &&
+		relativePath !== '..' &&
+		!relativePath.startsWith(`..${sep}`) &&
+		!isAbsolute(relativePath)
 	)
 }
 
 export function resolveInsideDirectory(directory: string, relativePath: string): string {
-	const target = resolve(directory, ...relativePath.split('/'))
-
-	if (!isInsideDirectory(directory, target)) {
+	if (isAbsolute(relativePath)) {
 		throw new Error(`Invalid cache path: ${relativePath}`)
 	}
 
-	return target
+	const resolvedPath = resolve(directory, ...relativePath.split('/'))
+
+	if (!isInsideDirectory(directory, resolvedPath)) {
+		throw new Error(`Invalid cache path: ${relativePath}`)
+	}
+
+	return resolvedPath
 }
 
 export function formatBytes(bytes: number): string {
@@ -203,14 +198,35 @@ export function createConfigHash(config: unknown, options: ResolvedOptions): str
 		stableSerialize({
 			astroConfig: config,
 			compression: {
-				algorithmVersion: CACHE_VERSION,
-				brotliQuality: constants.BROTLI_MAX_QUALITY,
-				gzipLevel: constants.Z_BEST_COMPRESSION,
-				zopfliOptions: options.useZopfli,
-				minSize: options.minSize,
-				fileTypes: options.fileTypes,
+				version: CACHE_VERSION,
 				algorithms: options.algorithms,
 			},
 		}),
 	)
+}
+
+// -----------------------------------------------------------------------------
+// Logging
+// -----------------------------------------------------------------------------
+
+export function log(logger: Logger, options: ResolvedOptions, level: 1 | 2, message: string): void {
+	if (options.logLevel < level) {
+		return
+	}
+
+	if (level === 2) {
+		logger.debug(message)
+	} else {
+		logger.info(message)
+	}
+}
+
+export function logError(logger: Logger, error: unknown): void {
+	const message = error instanceof Error ? error.message : String(error)
+	logger.error(message)
+}
+
+export function logHeader(title: string): void {
+	const header = styleText(['bgGreen', 'black'], ` ${title} `)
+	console.log(`\n${header}`)
 }
