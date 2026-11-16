@@ -1,6 +1,18 @@
 import type { AstroIntegration } from 'astro'
 
 import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
+
+import type {
+	BrotliOptions,
+	ZstdOptions,
+	CompressionOptions,
+	ResolvedOptions,
+	ZopfliOptions,
+	ZopfliModule,
+	AlgorithmOptions,
+	ResolvedAlgorithmOptions,
+} from './types.js'
 
 import {
 	DEFAULT_CONCURRENCY,
@@ -16,52 +28,9 @@ import {
 	DEFAULT_LOG_LEVEL,
 } from './constants.js'
 
-import { createConfigHash, getPackageManager, log, normalizeExtensions } from './utils.js'
-
+import { createConfigHash, normalizeExtensions, log } from './utils.js'
 import { runBuild } from './build.js'
-
-import type {
-	BrotliOptions,
-	ZstdOptions,
-	CompressionOptions,
-	ResolvedOptions,
-	ZopfliOptions,
-	ZopfliModule,
-	AlgorithmOptions,
-	ResolvedAlgorithmOptions,
-} from './types.js'
-import { resolve } from 'node:path'
-
-/**
- * Dynamically load zopfli when needed
- */
-export async function loadZopfli(): Promise<ZopfliModule> {
-	try {
-		const zopfliPackage = (await import('node-zopfli-es')) as unknown as {
-			default: ZopfliModule
-		}
-
-		return zopfliPackage.default
-	} catch (error) {
-		const installScripts = new Map([
-			['pnpm', 'pnpm add -D node-zopfli-es'],
-			['yarn', 'yarn add -D node-zopfli-es'],
-			['bun', 'bun add -d node-zopfli-es'],
-			['npm', 'npm install -D node-zopfli-es'],
-		])
-
-		const packageManager = getPackageManager()
-
-		const command = packageManager ? installScripts.get(packageManager) : undefined
-
-		throw new Error(
-			`The "node-zopfli-es" package is required when Zopfli is enabled.${
-				command ? ` Install it with: ${command}` : ''
-			}`,
-			{ cause: error },
-		)
-	}
-}
+import { loadOptionalZopfli, loadZopfli } from './zopfli.js'
 
 // -----------------------------------------------------------------------------
 // Option resolution
@@ -88,9 +57,11 @@ function resolveGzipOptions(value: AlgorithmOptions['gzip']): ResolvedAlgorithmO
 	if (typeof value === 'object' && 'zopfli' in value) {
 		const zopfliOptions = resolveZopfliOptions(value.zopfli)
 
-		if (zopfliOptions) {
-			return { zopfli: zopfliOptions }
+		if (!zopfliOptions) {
+			return DEFAULT_ZLIB_OPTIONS
 		}
+
+		return { zopfli: zopfliOptions }
 	}
 
 	return {
@@ -184,13 +155,28 @@ function resolveOptions(userOptions: CompressionOptions): ResolvedOptions {
 
 export default function precompressor(userOptions: CompressionOptions = {}): AstroIntegration {
 	const options = resolveOptions(userOptions)
-	const shouldLoadZopfli = options.algorithms.gzip && 'zopfli' in options.algorithms.gzip
 
-	// Start zopfli import while vite is still available, ignoring errors if unawaited
-	const zopfliPromise = shouldLoadZopfli ? loadZopfli() : undefined
+	// Start zopfli import while vite is still available
+	let zopfliPromise: Promise<ZopfliModule | undefined> | undefined
+	let zopfli: ZopfliModule | undefined
+	const gzipOption = userOptions.algorithms?.gzip
+	const explicitZopfli =
+		typeof gzipOption === 'object' &&
+		gzipOption !== null &&
+		'zopfli' in gzipOption &&
+		Boolean(gzipOption.zopfli)
+	const optionalZopfli =
+		gzipOption === true || (Boolean(options.algorithms.gzip) && typeof gzipOption === 'undefined')
+	if (explicitZopfli) {
+		zopfliPromise = loadZopfli()
+	} else if (optionalZopfli) {
+		zopfliPromise = loadOptionalZopfli()
+	}
+
+	// Attach a rejection handler immediately to prevent unhandled rejections.
+	// The original promise still rejects when awaited below.
 	void zopfliPromise?.catch(() => {})
 
-	let zopfli: ZopfliModule | undefined
 	let cacheDirectory: string | undefined
 	let configHash: string | undefined
 
@@ -200,9 +186,19 @@ export default function precompressor(userOptions: CompressionOptions = {}): Ast
 		hooks: {
 			'astro:config:setup': async ({ config, logger }) => {
 				// Finish loading Zopfli only if needed
-				if (shouldLoadZopfli) {
+				if (explicitZopfli) {
 					log(logger, options, 2, 'Loading Zopfli')
 					zopfli = await zopfliPromise
+				} else if (optionalZopfli) {
+					zopfli = await zopfliPromise
+
+					if (zopfli) {
+						options.algorithms.gzip = {
+							zopfli: DEFAULT_ZOPFLI_OPTIONS,
+						}
+
+						log(logger, options, 1, 'Zopfli detected; using Zopfli for Gzip compression')
+					}
 				}
 
 				cacheDirectory = resolve(fileURLToPath(config.cacheDir))

@@ -6,8 +6,6 @@ import { createHash } from 'node:crypto'
 
 import { performance } from 'node:perf_hooks'
 
-import { styleText } from 'node:util'
-
 import picomatch from 'picomatch'
 
 import { ALGORITHM_EXTENSIONS, PLUGIN_NAME, SUPPORTED_ALGORITHMS } from './constants.js'
@@ -27,6 +25,9 @@ import {
 	log,
 	logError,
 	logHeader,
+	dim,
+	green,
+	bold,
 	toCacheKey,
 } from './utils.js'
 
@@ -162,12 +163,7 @@ function logFileResult(
 			? `${formatBytes(sourceSize)} → ${formatBytes(result.size)} (-${savings}%) in ${formatDuration(result.elapsed)}`
 			: `(reused cache entry) (${formatBytes(result.size)})`
 
-		log(
-			logger.fork(''),
-			options,
-			1,
-			`  ${styleText('green', '▶')} ${filePath}${extension} ${styleText('dim', status)}`,
-		)
+		log(logger.fork(''), options, 1, `  ${green('▶')} ${filePath}${extension} ${dim(status)}`)
 	}
 }
 
@@ -419,9 +415,9 @@ export async function runBuild(
 	const elapsed = performance.now() - buildStart
 
 	if (options.logLevel >= 1) {
-		logger.fork('').info(styleText('green', `✓ Completed in ${formatDuration(elapsed)}\n`))
+		logger.fork('').info(green(`✓ Completed in ${formatDuration(elapsed)}\n`))
 	} else {
-		logger.info(styleText('green', `✓ Completed in ${formatDuration(elapsed)}`))
+		logger.info(green(`✓ Completed in ${formatDuration(elapsed)}`))
 	}
 
 	logger.info(
@@ -454,5 +450,5 @@ export async function runBuild(
 		throw new Error(`[${PLUGIN_NAME}] Compression failed for ${stats.errors.length} operation(s).`)
 	}
 
-	logger.info(styleText('bold', 'Done!'))
+	logger.info(bold('Done!'))
 }

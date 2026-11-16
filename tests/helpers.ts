@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { vi } from 'vitest'
+import { dirname, join } from 'node:path'
+import { afterEach, vi } from 'vitest'
 
 import type { Logger, ResolvedOptions } from '../src/types.js'
 import { DEFAULT_ZLIB_OPTIONS } from '../src/constants.js'
@@ -20,8 +20,17 @@ export function createLogger(): Logger {
 	return logger as unknown as Logger
 }
 
-export function createOptions(overrides: Partial<ResolvedOptions> = {}): ResolvedOptions {
-	return {
+type TestOptionsOverrides = Omit<
+	Partial<ResolvedOptions>,
+	'algorithms' | 'performance' | 'filters'
+> & {
+	algorithms?: Partial<ResolvedOptions['algorithms']>
+	performance?: Partial<ResolvedOptions['performance']>
+	filters?: Partial<ResolvedOptions['filters']>
+}
+
+export function createOptions(overrides: TestOptionsOverrides = {}): ResolvedOptions {
+	const defaults: ResolvedOptions = {
 		algorithms: {
 			gzip: DEFAULT_ZLIB_OPTIONS,
 			brotli: false,
@@ -42,12 +51,41 @@ export function createOptions(overrides: Partial<ResolvedOptions> = {}): Resolve
 		logLevel: 0,
 		failOnError: false,
 		recompressOnConfigChange: false,
+	}
+
+	return {
+		...defaults,
 		...overrides,
+		algorithms: { ...defaults.algorithms, ...overrides.algorithms },
+		performance: { ...defaults.performance, ...overrides.performance },
+		filters: { ...defaults.filters, ...overrides.filters },
 	}
 }
 
-export async function createTempDirectory(): Promise<string> {
-	return mkdtemp(join(tmpdir(), 'astro-precompressor-test-'))
+export async function createTempDirectory(prefix = 'astro-precompressor-test-'): Promise<string> {
+	return mkdtemp(join(tmpdir(), prefix))
+}
+
+/** Creates a temporary directory and registers automatic cleanup after each test. */
+export function useTempDirectory(prefix?: string) {
+	let directory = ''
+
+	afterEach(async () => {
+		if (directory) {
+			await removeTempDirectory(directory)
+			directory = ''
+		}
+	})
+
+	return {
+		create: async (): Promise<string> => {
+			if (directory) {
+				throw new Error('Temporary directory already created for this test.')
+			}
+			directory = await createTempDirectory(prefix)
+			return directory
+		},
+	}
 }
 
 export async function createFile(
@@ -57,7 +95,7 @@ export async function createFile(
 ): Promise<string> {
 	const filePath = join(directory, relativePath)
 
-	await mkdir(join(filePath, '..'), { recursive: true })
+	await mkdir(dirname(filePath), { recursive: true })
 	await writeFile(filePath, contents)
 
 	return filePath

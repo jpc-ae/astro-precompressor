@@ -1,20 +1,14 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CompressionAlgorithm, CompressionResult } from '../src/types.js'
 
 import { compressFile } from '../src/compression.js'
 import { runBuild } from '../src/build.js'
 
-import {
-	createFile,
-	createLogger,
-	createOptions,
-	createTempDirectory,
-	removeTempDirectory,
-} from './helpers.js'
+import { createFile, createLogger, createOptions, useTempDirectory } from './helpers.js'
 
 vi.mock('../src/compression.js', () => ({
 	compressFile: vi.fn(),
@@ -23,6 +17,7 @@ vi.mock('../src/compression.js', () => ({
 const mockedCompressFile = vi.mocked(compressFile)
 
 describe('runBuild', () => {
+	const temp = useTempDirectory()
 	let directory = ''
 	let outputDirectory = ''
 	let cacheDirectory = ''
@@ -56,15 +51,8 @@ describe('runBuild', () => {
 		})
 	})
 
-	afterEach(async () => {
-		if (directory) {
-			await removeTempDirectory(directory)
-			directory = ''
-		}
-	})
-
 	async function setup(): Promise<void> {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		outputDirectory = join(directory, 'dist')
 		cacheDirectory = join(directory, 'cache')

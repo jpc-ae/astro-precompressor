@@ -2,19 +2,13 @@ import { readFile, readdir, stat, utimes } from 'node:fs/promises'
 import { gunzipSync, brotliDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import { compressFile } from '../src/compression.js'
 import { Semaphore } from '../src/semaphore.js'
 import { getArtifactPath } from '../src/cache.js'
 
-import {
-	createFile,
-	createLogger,
-	createOptions,
-	createTempDirectory,
-	removeTempDirectory,
-} from './helpers.js'
+import { createFile, createLogger, createOptions, useTempDirectory } from './helpers.js'
 
 import { DEFAULT_ZLIB_OPTIONS } from '../src/constants.js'
 
@@ -23,6 +17,7 @@ function createCompressibleContent(label: string): string {
 }
 
 describe('compressFile', () => {
+	const temp = useTempDirectory()
 	let directory = ''
 	let semaphore: Semaphore
 
@@ -30,15 +25,8 @@ describe('compressFile', () => {
 		semaphore = new Semaphore(2)
 	})
 
-	afterEach(async () => {
-		if (directory) {
-			await removeTempDirectory(directory)
-			directory = ''
-		}
-	})
-
 	it('generates a gzip artifact and output sidecar', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const content = createCompressibleContent('Hello, World!')
 		const source = await createFile(directory, 'output/index.html', content)
@@ -75,7 +63,7 @@ describe('compressFile', () => {
 	})
 
 	it('generates gzip and Brotli artifacts independently', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const content = createCompressibleContent('Hello, World!')
 		const source = await createFile(directory, 'output/index.html', content)
@@ -109,7 +97,7 @@ describe('compressFile', () => {
 	})
 
 	it('reuses cached artifacts when the source hash matches', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const content = createCompressibleContent('Hello, Cache!')
 		const source = await createFile(directory, 'output/index.html', content)
@@ -161,7 +149,7 @@ describe('compressFile', () => {
 	})
 
 	it('regenerates when the source hash changes', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const content = createCompressibleContent('Hello, Cache!')
 		const source = await createFile(directory, 'output/index.html', content)
@@ -186,7 +174,7 @@ describe('compressFile', () => {
 	})
 
 	it('regenerates when forceRecompress is true', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const content = createCompressibleContent('Hello, Darkness!')
 		const source = await createFile(directory, 'output/index.html', content)
@@ -223,7 +211,7 @@ describe('compressFile', () => {
 	})
 
 	it('rejects when Zopfli is enabled but not initialized', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const content = createCompressibleContent('Hello, Darkness!')
 		const source = await createFile(directory, 'output/index.html', content)
@@ -255,7 +243,7 @@ describe('compressFile', () => {
 	})
 
 	it('does not leave temporary files after a compression failure', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const content = createCompressibleContent('Hello, Failure!')
 		const source = await createFile(directory, 'output/index.html', content)
@@ -294,7 +282,7 @@ describe('compressFile', () => {
 	})
 
 	it('does not overwrite the source file', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const content = createCompressibleContent('Hello, World!')
 		const source = await createFile(directory, 'output/index.html', content)
@@ -316,7 +304,7 @@ describe('compressFile', () => {
 	})
 
 	it('discards compressed output when it is larger than the source', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const source = await createFile(directory, 'output/tiny.txt', 'x')
 		const artifactDirectory = join(directory, 'cache')
@@ -362,7 +350,7 @@ describe('compressFile', () => {
 	})
 
 	it('discards oversized cached artifacts without recompressing', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const source = await createFile(directory, 'output/tiny.txt', 'x')
 		const artifactDirectory = join(directory, 'cache')
@@ -420,7 +408,7 @@ describe('compressFile', () => {
 	})
 
 	it('copies larger compressed output when discardCompressionIfLarger is disabled', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const source = await createFile(directory, 'output/tiny.txt', 'x')
 
@@ -460,7 +448,7 @@ describe('compressFile', () => {
 	})
 
 	it('shares one concurrency limit across files and enabled algorithms', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 		semaphore = new Semaphore(1)
 
 		const content = createCompressibleContent('Shared semaphore')
@@ -526,7 +514,7 @@ describe('compressFile', () => {
 	})
 
 	it('releases its semaphore slot when compression fails', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const source = await createFile(
 			directory,

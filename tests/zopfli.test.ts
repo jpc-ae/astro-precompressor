@@ -1,7 +1,9 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
 import { gunzipSync } from 'node:zlib'
 import { Readable, Transform } from 'node:stream'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { loadZopfli } from '../src/integration.js'
+
+import { loadZopfli, loadOptionalZopfli } from '../src/zopfli.js'
 
 describe('Zopfli', () => {
 	afterEach(() => {
@@ -33,9 +35,28 @@ describe('Zopfli', () => {
 				throw new Error('Module unavailable')
 			})
 
-			const { loadZopfli: load } = await import('../src/integration.js')
+			const { loadZopfli: load } = await import('../src/zopfli.js')
 
 			await expect(load()).rejects.toThrow()
+		})
+	})
+
+	describe('loadOptionalZopfli', () => {
+		it('returns undefined when the optional Zopfli package is unavailable', async () => {
+			const error = new Error("Cannot find package 'node-zopfli-es'") as NodeJS.ErrnoException
+			error.code = 'ERR_MODULE_NOT_FOUND'
+
+			const importer = vi.fn().mockRejectedValue(error)
+
+			await expect(loadOptionalZopfli(importer)).resolves.toBeUndefined()
+			expect(importer).toHaveBeenCalledOnce()
+		})
+
+		it('throws when the Zopfli package fails for another reason', async () => {
+			const error = new Error('Invalid Zopfli installation')
+			const importer = vi.fn().mockRejectedValue(error)
+
+			await expect(loadOptionalZopfli(importer)).rejects.toThrow('Invalid Zopfli installation')
 		})
 	})
 

@@ -1,7 +1,7 @@
 import { readFile, stat, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import {
 	copyPreservingTimestamps,
@@ -15,17 +15,11 @@ import {
 } from '../src/cache.js'
 
 import { ALGORITHM_EXTENSIONS, CACHE_VERSION } from '../src/constants.js'
-import { createFile, createTempDirectory, removeTempDirectory } from './helpers.js'
+import { createFile, useTempDirectory } from './helpers.js'
 
 describe('cache manifest', () => {
+	const temp = useTempDirectory()
 	let directory = ''
-
-	afterEach(async () => {
-		if (directory) {
-			await removeTempDirectory(directory)
-			directory = ''
-		}
-	})
 
 	it('creates an empty cache', () => {
 		expect(emptyCache()).toEqual({
@@ -36,7 +30,7 @@ describe('cache manifest', () => {
 	})
 
 	it('loads a valid manifest', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const manifestPath = join(directory, 'cache.json')
 
@@ -61,7 +55,7 @@ describe('cache manifest', () => {
 	})
 
 	it('ignores entries with non-string values', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const manifestPath = join(directory, 'cache.json')
 
@@ -85,7 +79,7 @@ describe('cache manifest', () => {
 	})
 
 	it('returns an empty cache for an unsupported version', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const manifestPath = join(directory, 'cache.json')
 
@@ -101,7 +95,7 @@ describe('cache manifest', () => {
 	})
 
 	it('returns an empty cache for malformed JSON', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const manifestPath = join(directory, 'cache.json')
 		await writeFile(manifestPath, '{invalid json')
@@ -110,13 +104,13 @@ describe('cache manifest', () => {
 	})
 
 	it('returns an empty cache when the manifest does not exist', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		expect(await loadCache(join(directory, 'missing.json'))).toEqual(emptyCache())
 	})
 
 	it('saves and reloads a manifest', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const manifestPath = join(directory, 'nested', 'cache.json')
 
@@ -136,6 +130,8 @@ describe('cache manifest', () => {
 })
 
 describe('artifact paths', () => {
+	const temp = useTempDirectory()
+
 	it('creates an artifact path with the algorithm extension', () => {
 		expect(getArtifactPath('/cache/artifacts', 'assets/index.html', '.gz')).toBe(
 			join('/cache/artifacts', 'assets', 'index.html.gz'),
@@ -149,41 +145,26 @@ describe('artifact paths', () => {
 	})
 
 	it('checks whether a file exists', async () => {
-		const directory = await createTempDirectory()
+		const directory = await temp.create()
+		const filePath = await createFile(directory, 'artifact.gz')
 
-		try {
-			const filePath = await createFile(directory, 'artifact.gz')
-
-			expect(await fileExists(filePath)).toBe(true)
-			expect(await fileExists(join(directory, 'missing.gz'))).toBe(false)
-		} finally {
-			await removeTempDirectory(directory)
-		}
+		expect(await fileExists(filePath)).toBe(true)
+		expect(await fileExists(join(directory, 'missing.gz'))).toBe(false)
 	})
 
 	it('returns false for a directory', async () => {
-		const directory = await createTempDirectory()
+		const directory = await temp.create()
 
-		try {
-			expect(await fileExists(directory)).toBe(false)
-		} finally {
-			await removeTempDirectory(directory)
-		}
+		expect(await fileExists(directory)).toBe(false)
 	})
 })
 
 describe('copyPreservingTimestamps', () => {
+	const temp = useTempDirectory()
 	let directory = ''
 
-	afterEach(async () => {
-		if (directory) {
-			await removeTempDirectory(directory)
-			directory = ''
-		}
-	})
-
 	it('copies the file and preserves its timestamps', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const source = await createFile(directory, 'cache/file.gz', 'compressed data')
 		const destination = join(directory, 'output/file.gz')
@@ -202,7 +183,7 @@ describe('copyPreservingTimestamps', () => {
 	})
 
 	it('does not change the source artifact timestamp', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const source = await createFile(directory, 'cache/file.gz')
 		const destination = join(directory, 'output/file.gz')
@@ -216,7 +197,7 @@ describe('copyPreservingTimestamps', () => {
 	})
 
 	it('rejects when the source file does not exist', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		await expect(
 			copyPreservingTimestamps(join(directory, 'missing.gz'), join(directory, 'output.gz')),
@@ -225,17 +206,11 @@ describe('copyPreservingTimestamps', () => {
 })
 
 describe('pruneCache', () => {
+	const temp = useTempDirectory()
 	let directory = ''
 
-	afterEach(async () => {
-		if (directory) {
-			await removeTempDirectory(directory)
-			directory = ''
-		}
-	})
-
 	it('removes stale artifacts and their manifest entries', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const artifactDirectory = join(directory, 'artifacts')
 
@@ -273,7 +248,7 @@ describe('pruneCache', () => {
 	})
 
 	it('does not remove entries that are still current', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const key = 'index.html'
 
@@ -292,17 +267,11 @@ describe('pruneCache', () => {
 })
 
 describe('removeDisabledArtifacts', () => {
+	const temp = useTempDirectory()
 	let directory = ''
 
-	afterEach(async () => {
-		if (directory) {
-			await removeTempDirectory(directory)
-			directory = ''
-		}
-	})
-
 	it('removes artifacts for disabled algorithms only', async () => {
-		directory = await createTempDirectory()
+		directory = await temp.create()
 
 		const artifactDirectory = join(directory, 'artifacts')
 		const key = 'index.html'

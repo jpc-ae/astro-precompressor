@@ -1,8 +1,7 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import {
 	formatBytes,
@@ -16,7 +15,7 @@ import {
 	createConfigHash,
 } from '../src/utils.js'
 
-import { createOptions } from './helpers.js'
+import { createOptions, useTempDirectory } from './helpers.js'
 
 describe('normalizeExtensions', () => {
 	it('normalizes extensions', () => {
@@ -82,20 +81,15 @@ describe('path utilities', () => {
 })
 
 describe('hashing', () => {
+	const temp = useTempDirectory()
 	let directory: string
-
-	afterEach(async () => {
-		if (directory) {
-			await rm(directory, { recursive: true, force: true })
-		}
-	})
 
 	it('creates a SHA-256 hash', () => {
 		expect(sha256('test')).toBe('9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08')
 	})
 
 	it('hashes file contents', async () => {
-		directory = await mkdtemp(join(tmpdir(), 'precompressor-utils-'))
+		directory = await temp.create()
 
 		const filePath = join(directory, 'file.txt')
 		await writeFile(filePath, 'test')
@@ -104,7 +98,7 @@ describe('hashing', () => {
 	})
 
 	it('rejects when the file cannot be read', async () => {
-		directory = await mkdtemp(join(tmpdir(), 'precompressor-utils-'))
+		directory = await temp.create()
 
 		await expect(hashFile(join(directory, 'missing.txt'))).rejects.toThrow()
 	})

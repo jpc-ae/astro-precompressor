@@ -1,39 +1,41 @@
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
-
 import type { Logger } from '../src/types.js'
-
 import precompressor from '../src/integration.js'
 import { runBuild } from '../src/build.js'
 
-import { createLogger } from './helpers.js'
+import { createLogger, useTempDirectory } from './helpers.js'
+
+const { runBuildMock } = vi.hoisted(() => ({
+	runBuildMock: vi.fn(),
+}))
 
 vi.mock('../src/build.js', () => ({
-	runBuild: vi.fn(),
+	runBuild: runBuildMock,
 }))
 
 const mockedRunBuild = vi.mocked(runBuild)
 
 describe('precompressor integration', () => {
+	const temp = useTempDirectory('precompressor-integration-')
 	let directory = ''
 
 	afterEach(async () => {
 		vi.clearAllMocks()
-
-		if (directory) {
-			await rm(directory, { recursive: true, force: true })
-			directory = ''
-		}
+		vi.doUnmock('node-zopfli-es')
+		vi.resetModules()
 	})
 
-	async function createIntegration(options: Parameters<typeof precompressor>[0] = {}) {
-		directory = await mkdtemp(join(tmpdir(), 'precompressor-integration-'))
+	async function createIntegration(
+		options: Parameters<typeof precompressor>[0] = {},
+		factory: typeof precompressor = precompressor,
+	) {
+		directory = await temp.create()
 
-		const integration = precompressor(options)
+		const integration = factory(options)
 		const logger = createLogger()
 
 		const setup = integration.hooks['astro:config:setup'] as unknown as (args: {
@@ -81,6 +83,40 @@ describe('precompressor integration', () => {
 		expect(options.algorithms.zstd).toBe(false)
 	})
 
+	it('automatically uses Zopfli for default gzip when it is installed', async () => {
+		const { buildDone } = await createIntegration()
+
+		await buildDone({
+			dir: pathToFileURL(`${directory}/dist/`),
+			logger: createLogger(),
+		})
+
+		const [, , , options, , zopfli] = mockedRunBuild.mock.calls[0]
+
+		expect(options.algorithms.gzip).toHaveProperty('zopfli')
+		expect(zopfli?.createGzip).toBeTypeOf('function')
+	})
+
+	it('automatically detects Zopfli when gzip is explicitly enabled', async () => {
+		const { buildDone } = await createIntegration({
+			algorithms: {
+				gzip: true,
+				brotli: false,
+				zstd: false,
+			},
+		})
+
+		await buildDone({
+			dir: pathToFileURL(`${directory}/dist/`),
+			logger: createLogger(),
+		})
+
+		const [, , , options, , zopfli] = mockedRunBuild.mock.calls[0]
+
+		expect(options.algorithms.gzip).toHaveProperty('zopfli')
+		expect(zopfli?.createGzip).toBeTypeOf('function')
+	})
+
 	it('supports disabling individual algorithms', async () => {
 		const { buildDone } = await createIntegration({
 			algorithms: {
@@ -95,14 +131,15 @@ describe('precompressor integration', () => {
 			logger: createLogger(),
 		})
 
-		const options = mockedRunBuild.mock.calls[0][3]
+		const [, , , options, , zopfli] = mockedRunBuild.mock.calls[0]
 
 		expect(options.algorithms.gzip).toBe(false)
 		expect(options.algorithms.brotli).toBeTruthy()
 		expect(options.algorithms.zstd).toBe(false)
+		expect(zopfli).toBeUndefined()
 	})
 
-	it('resolves explicitly configured gzip engines', async () => {
+	it('does not auto-detect Zopfli for explicitly configured zlib options', async () => {
 		const { buildDone } = await createIntegration({
 			algorithms: {
 				gzip: {
@@ -118,11 +155,13 @@ describe('precompressor integration', () => {
 			logger: createLogger(),
 		})
 
-		const options = mockedRunBuild.mock.calls[0][3]
+		const [, , , options, , zopfli] = mockedRunBuild.mock.calls[0]
 
 		expect(options.algorithms.gzip).toMatchObject({
 			level: 1,
 		})
+		expect(options.algorithms.gzip).not.toHaveProperty('zopfli')
+		expect(zopfli).toBeUndefined()
 	})
 
 	it('passes algorithm options through', async () => {
@@ -158,11 +197,54 @@ describe('precompressor integration', () => {
 			logger: createLogger(),
 		})
 
-		const options = mockedRunBuild.mock.calls[0][3]
+		const [, , , options, , zopfli] = mockedRunBuild.mock.calls[0]
 
 		expect(options.algorithms).toMatchObject({
 			gzip: {},
 		})
+		expect(options.algorithms.gzip).not.toHaveProperty('zopfli')
+		expect(zopfli).toBeUndefined()
+	})
+
+	it('requires Zopfli when it is explicitly enabled', async () => {
+		const expectedError = new Error(
+			'The "node-zopfli-es" package is required when Zopfli is explicitly enabled. Install it with: pnpm add -D node-zopfli-es',
+		)
+
+		vi.doMock('../src/zopfli.js', async importOriginal => {
+			const actual = await importOriginal<typeof import('../src/zopfli.js')>()
+
+			return {
+				...actual,
+				loadZopfli: vi.fn().mockRejectedValue(expectedError),
+			}
+		})
+
+		const { default: precompressorWithoutZopfli } = await import('../src/integration.js')
+
+		const integration = precompressorWithoutZopfli({
+			algorithms: {
+				gzip: {
+					zopfli: true,
+				},
+			},
+		})
+
+		const setup = integration.hooks['astro:config:setup'] as unknown as (args: {
+			config: { cacheDir: URL }
+			logger: Logger
+		}) => Promise<void>
+
+		directory = await temp.create()
+
+		await expect(
+			setup({
+				config: {
+					cacheDir: pathToFileURL(`${directory}/cache/`),
+				},
+				logger: createLogger(),
+			}),
+		).rejects.toThrow(expectedError.message)
 	})
 
 	it('passes filter options through', async () => {
@@ -229,7 +311,7 @@ describe('precompressor integration', () => {
 			logger: Logger
 		}) => Promise<void>
 
-		directory = await mkdtemp(join(tmpdir(), 'precompressor-integration-'))
+		directory = await temp.create()
 
 		await setup({
 			config: {
