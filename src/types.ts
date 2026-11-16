@@ -88,7 +88,7 @@ export interface BuildStats {
 	reusedFiles: number
 	regeneratedFiles: number
 	sourceBytes: number
-	workerElapsed: number
 	algorithms: Record<CompressionAlgorithm, AlgorithmStats>
+	elapsed: number
 	errors: Error[]
 }

@@ -118,7 +118,6 @@ function createBuildStats(eligibleFileCount: number): BuildStats {
 		reusedFiles: 0,
 		regeneratedFiles: 0,
 		sourceBytes: 0,
-		workerElapsed: 0,
 		algorithms: {
 			brotli: {
 				generated: 0,
@@ -139,6 +138,7 @@ function createBuildStats(eligibleFileCount: number): BuildStats {
 				discarded: 0,
 			},
 		},
+		elapsed: 0,
 		errors: [],
 	}
 }
@@ -347,7 +347,6 @@ export async function runBuild(
 				cache.entries[file.key] = currentHash
 
 				stats.sourceBytes += file.size
-				stats.workerElapsed += result.elapsed
 
 				const generated = result.compressions.some(compression => compression.generated)
 
@@ -362,6 +361,9 @@ export async function runBuild(
 
 					algorithmStats.bytes += compression.size
 					algorithmStats.elapsed += compression.elapsed
+
+					// Also add up the combined processing time
+					stats.elapsed += compression.elapsed
 
 					if (compression.generated) {
 						algorithmStats.generated++
@@ -421,7 +423,7 @@ export async function runBuild(
 	}
 
 	logger.info(
-		`Processed ${stats.files} source files using ${formatDuration(stats.workerElapsed)} of combined worker time.`,
+		`Processed ${stats.files} source files using ${formatDuration(stats.elapsed)} of combined processing time.`,
 	)
 
 	const totalGenerated = Object.values(stats.algorithms).reduce(

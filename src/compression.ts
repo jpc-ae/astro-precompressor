@@ -183,11 +183,8 @@ export async function compressFile(
 	zopfli: ZopfliModule | undefined,
 	semaphore: Semaphore,
 ): Promise<{
-	elapsed: number
 	compressions: CompressionResult[]
 }> {
-	const start = performance.now()
-
 	// Each algorithm has its own independent input stream.
 	// Promise.allSettled ensures that one failed algorithm does not
 	// prevent the other algorithms from completing.
@@ -231,7 +228,6 @@ export async function compressFile(
 	}
 
 	return {
-		elapsed: performance.now() - start,
 		compressions: results.map(result => {
 			if (result.status !== 'fulfilled') {
 				throw result.reason

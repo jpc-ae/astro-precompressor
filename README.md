@@ -10,31 +10,76 @@ avoid unnecessary recompression between builds (the main motivation for building
 this integration) and supports configurable algorithms, file filtering, and
 performance.
 
+> [!IMPORTANT] For this integration to be useful, your hosting environment must
+> be set up for serving precompressed sidecars. See
+> [Configuring your hosting environment](#configuring-your-hosting-environment)
+> for details.
+
+## Quick Start
+
+Add the extension to your project with the `astro add` command.
+
+```bash
+# npm
+npx astro add astro-precompressor
+
+# pnpm
+pnpm astro add astro-precompressor
+
+# yarn
+yarn astro add astro-precompressor
+```
+
+This will install the module into your project, import the integration in your
+Astro config, and add it to the end of your integrations array. The next time
+you run your build, you should see the compression details at the end of your
+build output.
+
+```bash
+ generating precompressed files 
+16:40:29   ▶ index.html.gz 185.99 KiB → 65.74 KiB (-64.7%) in 431ms
+16:40:29   ▶ index.html.br 185.99 KiB → 36.95 KiB (-80.1%) in 681ms
+...
+16:40:30 ✓ Completed in 2.31s
+
+16:40:30 [astro-precompressor] Processed 71 source files using 47.47s of combined processing time.
+16:40:30 [astro-precompressor] Reused: 0 | Updated: 71 | Generated: 142 (0 discarded)
+16:40:30 [astro-precompressor] gzip: 71 generated | 1.74 MiB (-64.2%) | 21.46s combined processing time
+16:40:30 [astro-precompressor] brotli: 71 generated | 1.07 MiB (-78.1%) | 26.01s combined processing time
+16:40:30 [astro-precompressor] Errors: 0
+16:40:30 [astro-precompressor] Done!
+```
+
+> [!NOTE] 'combined processing time' refers to the combined processing time of
+> all compression tasks. Since these tasks run in parallel, the actual time
+> taken for them all to complete will typically be much shorter depending on
+> your concurrency value.
+
 ## Motivation
 
-While various compression options exist for astro builds, they either do not
+While various compression options exist for Astro builds, they either do not
 offer caching or are too complicated to configure for common options like file
 filtering. They are also either restricted to node's zlib library or require
-commandline scripts.
+command-line scripts.
 
-This package attempts to provide the easiest possible configuration without
-compromise while ensuring the fastest possible build and, more importantly,
-rebuild times. It also offers optional Zopfli for better gzip compression, and
+This package aims to provide a straightforward configuration without sacrificing
+performance or flexibility. The priority is faster builds and, more importantly,
+faster rebuilds. It also offers optional Zopfli for better gzip compression, and
 is open to adding other engines on request (please
 [open an issue](https://github.com/jpc-ae/astro-precompressor/issues) for any
 requests).
 
 ## Features
 
-- **Sane defaults:** Gzip & Brotli set for maximum compression without redundant
-  processing, with Zstandard off but available if needed (it being better suited
-  to on-the-fly compression).
+- **Sane defaults:** Gzip and Brotli tuned for high compression, with
+  incremental caching to avoid redundant processing; Zstandard off but available
+  if needed.
 - **Highly configurable:** Fine-tune algorithm-specific compression settings,
   performance options, file filtering and cleanup.
 - **Optional Zopfli:** Install the `node-zopfli-es` package into your project
   for smaller gzip output.
 - **Incremental builds:** Reuse cached compression artifacts when source files
-  haven't changed, preserving original compression timestamps.
+  haven't changed, preserving cached artifact modification timestamps.
 - **Detailed filtering:** Specify file extensions, a minimum size, and include
   or exclude paths using glob patterns.
 - **Compression size checks:** Discard compressed outputs that are not smaller
@@ -53,17 +98,29 @@ pnpm add -D astro-precompressor
 
 # yarn
 yarn add -D astro-precompressor
-
-# bun
-bun add -d astro-precompressor
 ```
 
 ### Optional Zopfli
 
-If you want to use Zopfli for gzip compression, add the `node-zopfli-es` package
-to your install script above. It will be autodetected and enabled by default,
-unless you explicitly disable zopfli or provide your own zlib options (See
-below).
+To enable the Zopfli gzip compression engine, install node-zopfli-es as a
+development dependency in your Astro project. It will be detected automatically
+when the integration initializes.
+
+If installed, Zopfli is automatically used for gzip compression when no custom
+gzip options are provided. If Zopfli is explicitly enabled, the package must be
+installed in your Astro project or the build will fail. See
+[Compression Algorithms](#compression-algorithms) for more details.
+
+```bash
+# npm
+npm install -D node-zopfli-es
+
+# pnpm
+pnpm add -D node-zopfli-es
+
+# yarn
+yarn add -D node-zopfli-es
+```
 
 ## Usage
 
@@ -92,6 +149,18 @@ export default defineConfig({
 
 The integration accepts an optional configuration object.
 
+| Option                     | Default                 | Description                                               |
+| -------------------------- | ----------------------- | --------------------------------------------------------- |
+| `algorithms`               | Gzip and Brotli enabled | Compression algorithms and settings                       |
+| `filters`                  | Built-in file types     | Files eligible for compression                            |
+| `performance`              | Automatic concurrency   | Processing and caching behaviour                          |
+| `logLevel`                 | 2                       | Logging verbosity                                         |
+| `failOnError`              | disabled                | Whether compression failures stop the build               |
+| `recompressOnConfigChange` | disabled                | Whether changes to this configuration force recompression |
+
+Any provided options will be merged with the defaults. For example, `gzip` will
+still be enabled with the configuration below.
+
 ```ts
 precompressor({
 	algorithms: {
@@ -108,8 +177,7 @@ precompressor({
 })
 ```
 
-Any provided options will be merged with the defaults. The following sections
-describe the details of each option.
+The following sections describe the details of each option.
 
 ### Compression Algorithms
 
@@ -126,13 +194,16 @@ algorithms: {
 }
 ```
 
+> [!NOTE] The `constants` object used in the algorithm configurations below
+> comes from the `node:zlib` package.
+
 #### Gzip
 
 Gzip supports two compression engines:
 
 - **zlib:** The standard Node.js compression implementation.
 - **Zopfli:** An optional, more computationally intensive implementation that
-  generally produces smaller Gzip files. It depends on the `node-zopfli-es`
+  generally produces smaller gzip files. It depends on the `node-zopfli-es`
   package.
 
 Without `node-zopfli-es` installed, the following zlib options are used. They
@@ -145,10 +216,10 @@ gzip: {
 }
 ```
 
-When `node-zopfli-es` is installed in the base astro project, it should be
-detected and used automatically. It can also be explicitly enabled, in which
-case the build will fail when the package is missing. It's default settings are
-below.
+When `node-zopfli-es` is installed in your Astro project, it is automatically
+detected and used for gzip compression when no custom gzip options are provided.
+Alternatively, Zopfli can be explicitly enabled by providing a Zopfli options
+object, in which case the build will fail if the package is missing.
 
 ```ts
 gzip: {
@@ -167,31 +238,48 @@ gzip: {
 > turned off for a similar reason. Feel free to experiment if maximum gzip
 > compression is a priority for you rather than relying on `brotli`.
 
+Even with the package installed, Zopfli can be explicitly disabled by providing
+custom `zlib` compression options or setting `algorithms.gzip.zopfli` to
+`false`.
+
+```ts
+gzip: {
+  zopfli: false,
+}
+```
+
+or
+
+```ts
+gzip: {
+  level: 1,
+}
+```
+
 #### Brotli
 
-The default brotli options ensure maximum compression without taxing your
-machine.
+The default Brotli options prioritize compression ratio.
 
 ```ts
 brotli: {
-    params: {
-      [constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY,
-    },
-  }
+  params: {
+    [constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY,
+  },
+}
 ```
 
 #### Zstandard
 
-Since brotli compresses better in almost all cases (at the expense of speed) and
-has been available in browsers for longer, it should be preferred. Zstandard is
-instead an attractive middleware on server rendered pages where compression
-speed and resource usage matters more.
+Since Brotli generally achieves better compression ratios for web assets (at the
+expense of speed) and has been available in browsers for longer, it should be
+preferred. Zstandard is instead an attractive middleware on server rendered
+pages where compression speed and resource usage matters more.
 
 This integration is exclusively for precompressing static assets. Zstandard is
 therefore disabled by default. It can, however, be enabled by setting its
 property to true or providing a configuration object. The default settings for
-`zstd` are below, providing maximum compression without overly taxing your
-system.
+`zstd` are below, prioritizing high compression ratios without overly taxing
+your system.
 
 ```ts
 zstd: {
@@ -201,16 +289,17 @@ zstd: {
 }
 ```
 
-> [!CAUTION] 19 is the maximum sane limit for parallel compression. If you set
-> this level higher (ultra levels 20-22), be sure to set the
-> `performance.concurrency` option as well to an appropriately conservative
-> number (like 1) and preferably make sure you're running it on a beefy server
-> to avoid stalling or running out of memory.
+> [!CAUTION] 19 is the highest standard compression level. Setting this higher
+> (20-22) turns on ultra mode which is significantly more compute-intensive. If
+> you experiment with these higher levels, consider reducing the
+> `performance.concurrency` option to a conservative value, such as 1, and
+> monitor memory usage. A machine with sufficient CPU and memory resources, such
+> as a server environment, is recommended.
 
 ### File Filtering
 
 The `filters` option controls which build output files should be compressed. Its
-default options are below
+default options are shown below.
 
 ```ts
 WEB_FILE_TYPES = [
@@ -258,14 +347,15 @@ filters: {
 | `exclude`    | Glob patterns specifying files or directories to exclude. |
 | `pruneCache` | Remove obsolete cached artifacts and manifest entries.    |
 
-If `fileTypes` is specified, the default types will be overwritten completely.
-For easier configuration, The `WEB_FILE_TYPES`, `DATA_FILE_TYPES` and
+If `fileTypes` is specified, the default types are replaced completely. For
+easier configuration, the `WEB_FILE_TYPES`, `DATA_FILE_TYPES` and
 `FONT_FILE_TYPES` constants can be imported as below.
 
 ```ts
 // astro.config.ts
 import { defineConfig } from 'astro/config'
-import { precompressor, WEB_FILE_TYPES, DATA_FILE_TYPES } from 'astro-precompressor'
+import precompressor from 'astro-precompressor'
+import { WEB_FILE_TYPES, DATA_FILE_TYPES } from 'astro-precompressor'
 
 export default defineConfig({
 	integrations: [
@@ -295,11 +385,11 @@ second excludes any directory named `ignored`.
 
 Files are matched in the following order:
 
-1. Any path that doesn't match a resolved `include` pattern is immediately
-   skipped
-2. Any path that matches a resolved `exclude` pattern is immediately skipped
-3. Only files with extensions found in `fileTypes` are included
-4. Any included file with a byte size larger then `minSize` is rejected
+1. If include patterns are configured, files that don't match any of them are
+   skipped.
+2. Files matching an exclude pattern are skipped.
+3. Files with extensions not listed in fileTypes are skipped.
+4. Files smaller than minSize are skipped.
 
 ### Performance
 
@@ -314,6 +404,8 @@ performance: {
 }
 ```
 
+> [!NOTE] `availableParallelism` comes from the `node:os` package
+
 | Option                       | Description                                                                                  |
 | ---------------------------- | -------------------------------------------------------------------------------------------- |
 | `concurrency`                | Maximum number of compression operations running concurrently.                               |
@@ -321,8 +413,8 @@ performance: {
 | `discardCompressionIfLarger` | Whether to discard compressed output when the original is smaller.                           |
 
 The default value for `concurrency` is set automatically based on the number of
-logical processors node sees as available. This is usually optimal, but lower
-values may use slightly less memory at the expense of speed.
+logical processors that Node.js reports as available. This is usually optimal,
+but lower values may use slightly less memory at the expense of speed.
 
 When `incremental` is enabled, compression artifacts are retained in the cache
 along with a hash of the source file. While this may marginally slow down
@@ -347,9 +439,8 @@ reused instead of running the compression engine again.
 The cache is maintained independently of the build output, allowing compressed
 sidecars to be restored along with their modification timestamps.
 
-With the cache pruning filter option enabled under, obsolete artifacts
-associated with files that no longer exist in the output directory can be
-cleaned up. See [`filters.pruneCache`](#file-filtering) for more details.
+When `filters.pruneCache` is enabled, obsolete artifacts associated with files
+that no longer exist in the output directory are removed.
 
 ## Output
 
@@ -395,8 +486,8 @@ Three levels of logging detail are available:
    individual processing steps.
 
 Even when `logLevel` is set to `2`, debug messages will only be shown when the
-`--verbose` flag is added to `astro build` script. The default level is `2` to
-match Astro's own logging conventions.
+`--verbose` flag is added to the `astro build` command. The default level is `2`
+to match Astro's own logging conventions.
 
 > [!TIP] Set this value to 0 if you prefer concise logs.
 
@@ -414,11 +505,11 @@ The integration uses Astro's build lifecycle hooks:
 - `astro:build:done`: Processes the completed build output and generates
   compressed artifacts.
 
-> [!WARNING] If zopfli is explicitely enabled in your configuration without
-> `node-zopfli-es` being installed, your astro build will fail at the setup
+> [!WARNING] If zopfli is explicitly enabled in your configuration without
+> `node-zopfli-es` being installed, your Astro build will fail at the setup
 > stage.
 
-## Configuring your hosting environment
+## Configuring Your Hosting Environment
 
 > [!IMPORTANT] Generating compressed sidecars does not automatically configure
 > your hosting environment to serve them. Your web server, CDN, or hosting
@@ -427,10 +518,10 @@ The integration uses Astro's build lifecycle hooks:
 
 ### Apache
 
-While MultiViews can be used by disabling Brazilian Portuguese, the more robust
-option is to use Apache's `rewrite_module` (`mod_rewrite.c`) to redirect
-browsers to the sidecars. Here is a sample `.htaccess` configuration that will
-work for most sites with the default options enabled. '.ttf', '.otf', '.eot',
+Apache's `rewrite_module` (`mod_rewrite.c`) can be used to redirect browsers to
+the sidecars. Here is a sample `.htaccess` configuration that will work for most
+sites with the default options enabled. It does not include a section for
+Zstandard, since that algorithm is disabled by default.
 
 ```apacheconf
 # SERVE COMPRESSED FILES
@@ -441,18 +532,18 @@ RewriteCond %{REQUEST_URI} \.(html?|css|(c|m)?js|svg|json|xml|rss|atom|txt|ttf|o
 RewriteCond %{REQUEST_FILENAME}.br -s [NC]
 RewriteRule ^(.+) $1.br [QSA]
 <FilesMatch "\.(html?|css|(c|m)?js|svg|json|xml|rss|atom|txt|ttf|otf|eot)\.br$">
-	### Remove .br Brazilian Portuguese language header to avoid confusion 
+	### Prevent Apache from interpreting .br as a language extension
 	RemoveLanguage .br
-	Header append Content-Encoding br
+	Header merge Content-Encoding br
 </FilesMatch>
 
 ## gzip
-RewriteCond %{HTTP:Accept-encoding} gz
+RewriteCond %{HTTP:Accept-encoding} gzip
 RewriteCond %{REQUEST_URI} \.(html?|css|(c|m)?js|svg|json|xml|rss|atom|txt|ttf|otf|eot)$ [NC]
 RewriteCond %{REQUEST_FILENAME}.gz -s [NC]
 RewriteRule ^(.+) $1.gz [QSA]
 <FilesMatch "\.(html?|css|(c|m)?js|svg|json|xml|rss|atom|txt|ttf|otf|eot)\.gz$">
-	Header append Content-Encoding gz
+	Header merge Content-Encoding gzip
 </FilesMatch>
 
 ## mime types
@@ -470,8 +561,8 @@ RewriteRule \.otf\.(br|gz)$ - [T=font/otf,E=no-brotli:1,E=no-gzip:1]
 RewriteRule \.eot\.(br|gz)$ - [T=application/vnd.ms-fontobject,E=no-brotli:1,E=no-gzip:1]
 
 ## cache compressed files separately
-<FilesMatch "\.(html?|css|(c|m)?js|svg|json|xml|rss|atom|txt|ttf|otf|eot)\.(br|gz)$">
-	Header append Vary Accept-Encoding
+<FilesMatch "\.(html?|css|(c|m)?js|svg|json|xml|rss|atom|txt|ttf|otf|eot)(\.(br|gz))?$">
+	Header merge Vary Accept-Encoding
 </FilesMatch>
 ```
 
@@ -479,15 +570,16 @@ RewriteRule \.eot\.(br|gz)$ - [T=application/vnd.ms-fontobject,E=no-brotli:1,E=n
 > configuration.
 
 > [!WARNING] The `.htaccess` configuration above is representative and does not
-> guard against a missing `rewrite_module`. Always test before using it in your
-> production environment.
+> guard against a missing `mod_rewrite`. It assumes `mod_headers` and `mod_mime`
+> are available, and does not account for `Accept-Encoding` quality values such
+> as `;q=0`. Always test before using it in your production environment.
 
 ### Nginx
 
 Serving precompressed sidecars requires `ngx_http_gzip_static_module` for gzip,
 `ngx_http_brotli_static_module` for Brotli and `ngx_http_zstd_static_module` for
-Zstandard. Ensure they are loaded and then enable them in a server location
-block.
+Zstandard. Ensure the required algorithm modules are loaded, and then enable
+them in a server location block.
 
 ```nginx
 server {
@@ -500,7 +592,7 @@ server {
         zstd_static on;
         gzip_static on;
 
-        # cash precompressed seperately
+        # cache precompressed files separately
         gzip_vary on;
 
         # fallback
@@ -508,6 +600,10 @@ server {
     }
 }
 ```
+
+> [!IMPORTANT] Zstandard support is not included as standard in many Nginx
+> installations. A separately built or third-party module may be required if
+> using this algorithm in your environment.
 
 ### Caddy
 
