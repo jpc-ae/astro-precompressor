@@ -252,15 +252,15 @@ performance: {
 }
 ```
 
-| Option                       | Description                                                                                  |
-| ---------------------------- | -------------------------------------------------------------------------------------------- |
-| `concurrency`                | Maximum number of files processed concurrently.                                              |
-| `incremental`                | Whether to retain cached copies of compressed files for reuse when source file hashes match. |
-| `discardCompressionIfLarger` | Discard compressed output when its size is greater than or equal to the original file size.  |
+| Option                       | Description                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `concurrency`                | Maximum number of compression operations running concurrently across all files and enabled algorithms. |
+| `incremental`                | Whether to retain cached copies of compressed files for reuse when source file hashes match.           |
+| `discardCompressionIfLarger` | Discard compressed output when its size is greater than or equal to the original file size.            |
 
-The default value for `concurrency` is calculated automatically based on the
-number of logical processors available and algorithms running. This is usually
-optimal, but lower values may use slightly less memory at the expense of speed.
+The default value for `concurrency` is set automatically based on the number of
+logical processors available. This is usually optimal, but lower values may use
+slightly less memory at the expense of speed.
 
 When `incremental` is enabled, compression artifacts are retained in the cache
 along with a hash of the source file. While this may marginally slow down

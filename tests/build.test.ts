@@ -416,7 +416,7 @@ describe('runBuild', () => {
 		expect(mockedCompressFile).toHaveBeenCalledTimes(2)
 	})
 
-	it('limits concurrent file workers according to configured concurrency and algorithm count', async () => {
+	it('limits concurrent file workers according to configured concurrency', async () => {
 		await setup()
 
 		for (let index = 0; index < 8; index++) {
@@ -475,8 +475,8 @@ describe('runBuild', () => {
 			undefined,
 		)
 
-		// 4 total compression slots / 2 algorithms = 2 file workers.
-		expect(peak).toBe(2)
+		// 4 total compression slots.
+		expect(peak).toBe(4)
 	})
 
 	it('handles an empty output directory', async () => {

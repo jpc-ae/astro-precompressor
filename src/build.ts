@@ -12,9 +12,13 @@ import picomatch from 'picomatch'
 
 import { ALGORITHM_EXTENSIONS, PLUGIN_NAME, SUPPORTED_ALGORITHMS } from './constants.js'
 
+import { runWorkerPool } from './worker-pool.js'
+
 import { loadCache, saveCache, pruneCache, removeDisabledArtifacts } from './cache.js'
 
 import { compressFile } from './compression.js'
+
+import { Semaphore } from './semaphore.js'
 
 import {
 	formatBytes,
@@ -236,10 +240,13 @@ export async function runBuild(
 
 	const currentKeys = new Set<string>()
 
-	for (const filePath of files) {
-		const fileStats = await stat(filePath)
+	const fileStats = await runWorkerPool(files, 16, async filePath => ({
+		path: filePath,
+		stats: await stat(filePath),
+	}))
 
-		if (fileStats.size < options.filters.minSize) {
+	for (const { path: filePath, stats: fileStat } of fileStats) {
+		if (fileStat.size < options.filters.minSize) {
 			continue
 		}
 
@@ -248,7 +255,7 @@ export async function runBuild(
 		eligibleFiles.push({
 			path: filePath,
 			key,
-			size: fileStats.size,
+			size: fileStat.size,
 		})
 
 		currentKeys.add(key)
@@ -304,6 +311,8 @@ export async function runBuild(
 	// Worker pool
 	// -------------------------------------------------------------------------
 
+	const semaphore = new Semaphore(options.performance.concurrency)
+
 	let nextIndex = 0
 
 	async function worker(): Promise<void> {
@@ -332,6 +341,7 @@ export async function runBuild(
 					options,
 					logger,
 					zopfli,
+					semaphore,
 				)
 
 				logFileResult(logger, options, file.key, file.size, result.compressions)
@@ -377,15 +387,11 @@ export async function runBuild(
 		}
 	}
 
-	// Set concurrency based on available threads and number of algorithms
-	const algorithmCount = enabledAlgorithms.length
-	if (!algorithmCount) {
+	if (!enabledAlgorithms.length) {
 		throw new Error('There are no eligible algorithms selected.')
 	}
-	const workerCount = Math.min(
-		eligibleFiles.length,
-		Math.max(1, Math.floor(options.performance.concurrency / algorithmCount)),
-	)
+
+	const workerCount = Math.min(eligibleFiles.length, options.performance.concurrency)
 
 	if (options.logLevel > 0) {
 		logHeader('generating precompressed files')

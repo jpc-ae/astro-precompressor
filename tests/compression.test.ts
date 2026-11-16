@@ -2,9 +2,10 @@ import { readFile, readdir, stat, utimes } from 'node:fs/promises'
 import { gunzipSync, brotliDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { compressFile } from '../src/compression.js'
+import { Semaphore } from '../src/semaphore.js'
 import { getArtifactPath } from '../src/cache.js'
 
 import {
@@ -23,6 +24,11 @@ function createCompressibleContent(label: string): string {
 
 describe('compressFile', () => {
 	let directory = ''
+	let semaphore: Semaphore
+
+	beforeEach(() => {
+		semaphore = new Semaphore(2)
+	})
 
 	afterEach(async () => {
 		if (directory) {
@@ -51,6 +57,7 @@ describe('compressFile', () => {
 			options,
 			logger,
 			undefined,
+			semaphore,
 		)
 
 		const artifact = getArtifactPath(artifactDirectory, 'index.html', '.gz')
@@ -91,6 +98,7 @@ describe('compressFile', () => {
 			options,
 			createLogger(),
 			undefined,
+			semaphore,
 		)
 
 		expect(result.compressions.map(item => item.algorithm).sort()).toEqual(['brotli', 'gzip'])
@@ -119,6 +127,7 @@ describe('compressFile', () => {
 			createOptions(),
 			createLogger(),
 			undefined,
+			semaphore,
 		)
 
 		expect(first.compressions[0].generated).toBe(true)
@@ -136,6 +145,7 @@ describe('compressFile', () => {
 			createOptions(),
 			createLogger(),
 			undefined,
+			semaphore,
 		)
 
 		expect(second.compressions[0]).toMatchObject({
@@ -168,6 +178,7 @@ describe('compressFile', () => {
 			createOptions(),
 			createLogger(),
 			undefined,
+			semaphore,
 		)
 
 		expect(result.compressions[0].generated).toBe(true)
@@ -192,6 +203,7 @@ describe('compressFile', () => {
 			createOptions(),
 			createLogger(),
 			undefined,
+			semaphore,
 		)
 
 		const result = await compressFile(
@@ -204,6 +216,7 @@ describe('compressFile', () => {
 			createOptions(),
 			createLogger(),
 			undefined,
+			semaphore,
 		)
 
 		expect(result.compressions[0].generated).toBe(true)
@@ -236,6 +249,7 @@ describe('compressFile', () => {
 				options,
 				createLogger(),
 				undefined,
+				semaphore,
 			),
 		).rejects.toThrow('Zopfli module has not been initialized.')
 	})
@@ -269,6 +283,7 @@ describe('compressFile', () => {
 				options,
 				createLogger(),
 				undefined,
+				semaphore,
 			),
 		).rejects.toThrow()
 
@@ -294,6 +309,7 @@ describe('compressFile', () => {
 			createOptions(),
 			createLogger(),
 			undefined,
+			semaphore,
 		)
 
 		expect(await readFile(source, 'utf8')).toBe(content)
@@ -326,6 +342,7 @@ describe('compressFile', () => {
 			}),
 			createLogger(),
 			undefined,
+			semaphore,
 		)
 
 		const artifact = getArtifactPath(artifactDirectory, 'tiny.txt', '.gz')
@@ -367,6 +384,7 @@ describe('compressFile', () => {
 			options,
 			createLogger(),
 			undefined,
+			semaphore,
 		)
 
 		const artifact = getArtifactPath(artifactDirectory, 'tiny.txt', '.gz')
@@ -389,6 +407,7 @@ describe('compressFile', () => {
 			}),
 			createLogger(),
 			undefined,
+			semaphore,
 		)
 
 		expect(second.compressions[0]).toMatchObject({
@@ -426,6 +445,7 @@ describe('compressFile', () => {
 			}),
 			createLogger(),
 			undefined,
+			semaphore,
 		)
 
 		const output = `${source}.gz`
@@ -437,5 +457,106 @@ describe('compressFile', () => {
 
 		expect(await stat(output)).toBeDefined()
 		expect((await stat(output)).size).toBeGreaterThan((await stat(source)).size)
+	})
+
+	it('shares one concurrency limit across files and enabled algorithms', async () => {
+		directory = await createTempDirectory()
+		semaphore = new Semaphore(1)
+
+		const content = createCompressibleContent('Shared semaphore')
+		const sourceA = await createFile(directory, 'output/a.html', content)
+		const sourceB = await createFile(directory, 'output/b.html', content)
+		const artifactDirectory = join(directory, 'cache')
+		const options = createOptions({
+			algorithms: {
+				gzip: DEFAULT_ZLIB_OPTIONS,
+				brotli: {},
+				zstd: false,
+			},
+		})
+
+		// Occupy the only slot so all compression requests must wait.
+		const release = await semaphore.acquire()
+		let settled = false
+
+		const pending = Promise.all([
+			compressFile(
+				sourceA,
+				artifactDirectory,
+				'a.html',
+				'hash-a',
+				undefined,
+				false,
+				options,
+				createLogger(),
+				undefined,
+				semaphore,
+			),
+			compressFile(
+				sourceB,
+				artifactDirectory,
+				'b.html',
+				'hash-b',
+				undefined,
+				false,
+				options,
+				createLogger(),
+				undefined,
+				semaphore,
+			),
+		]).finally(() => {
+			settled = true
+		})
+
+		try {
+			await new Promise(resolve => setTimeout(resolve, 25))
+			expect(settled).toBe(false)
+		} finally {
+			release()
+		}
+
+		const results = await pending
+
+		expect(results).toHaveLength(2)
+		expect(results.every(result => result.compressions.length === 2)).toBe(true)
+		expect(await stat(`${sourceA}.gz`)).toBeDefined()
+		expect(await stat(`${sourceA}.br`)).toBeDefined()
+		expect(await stat(`${sourceB}.gz`)).toBeDefined()
+		expect(await stat(`${sourceB}.br`)).toBeDefined()
+	})
+
+	it('releases its semaphore slot when compression fails', async () => {
+		directory = await createTempDirectory()
+
+		const source = await createFile(
+			directory,
+			'output/failure.html',
+			createCompressibleContent('Semaphore release'),
+		)
+		const failingOptions = createOptions({
+			algorithms: {
+				gzip: { zopfli: {} },
+				brotli: false,
+				zstd: false,
+			},
+		})
+
+		await expect(
+			compressFile(
+				source,
+				join(directory, 'cache'),
+				'failure.html',
+				'hash-failure',
+				undefined,
+				false,
+				failingOptions,
+				createLogger(),
+				undefined,
+				semaphore,
+			),
+		).rejects.toThrow('Zopfli module has not been initialized.')
+
+		// A subsequent operation must still be able to acquire the released slot.
+		await expect(semaphore.run(async () => 'slot released')).resolves.toBe('slot released')
 	})
 })

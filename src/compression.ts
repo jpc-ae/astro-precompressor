@@ -16,6 +16,8 @@ import { copyPreservingTimestamps, fileExists, getArtifactPath } from './cache.j
 
 import { formatDuration, log } from './utils.js'
 
+import type { Semaphore } from './semaphore.js'
+
 import type {
 	CompressionAlgorithm,
 	CompressionResult,
@@ -109,6 +111,7 @@ async function processAlgorithm(
 	options: ResolvedOptions,
 	logger: Logger,
 	zopfli: ZopfliModule | undefined,
+	semaphore: Semaphore,
 ): Promise<CompressionResult> {
 	const start = performance.now()
 
@@ -127,7 +130,9 @@ async function processAlgorithm(
 	if (!cached) {
 		log(logger, options, 2, `${relativePath}: Starting ${algorithm} compression`)
 
-		await generateCompressedFile(sourcePath, cachePath, algorithm, options.algorithms, zopfli)
+		await semaphore.run(() =>
+			generateCompressedFile(sourcePath, cachePath, algorithm, options.algorithms, zopfli),
+		)
 
 		log(logger, options, 2, `${relativePath}: ${algorithm} compression complete`)
 	}
@@ -176,6 +181,7 @@ export async function compressFile(
 	options: ResolvedOptions,
 	logger: Logger,
 	zopfli: ZopfliModule | undefined,
+	semaphore: Semaphore,
 ): Promise<{
 	elapsed: number
 	compressions: CompressionResult[]
@@ -203,6 +209,7 @@ export async function compressFile(
 				options,
 				logger,
 				zopfli,
+				semaphore,
 			),
 		)
 	}
