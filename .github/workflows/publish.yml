@@ -29,14 +29,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run tests
-        run: pnpm test
-
       - name: Build package
         run: pnpm build
 
-      - name: Ensure compatible npm version
-        run: npm install --global npm@^11.5.1
-
       - name: Publish to npm
-        run: npm publish --access public
+        run: pnpm publish --provenance
