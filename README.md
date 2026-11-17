@@ -12,7 +12,7 @@ performance.
 
 > [!IMPORTANT] For this integration to be useful, your hosting environment must
 > be set up for serving precompressed sidecars. See
-> [Configuring your hosting environment](#configuring-your-hosting-environment)
+> [Configuring Your Hosting Environment](#configuring-your-hosting-environment)
 > for details.
 
 ## Quick Start
@@ -612,7 +612,7 @@ server {
 ```
 
 > [!IMPORTANT] Zstandard support is not included as standard in many Nginx
-> installations. A separately built or third-party module may be required if
+> installations. A separately built or third-party module may be required when
 > using this algorithm in your environment.
 
 ### Caddy
