@@ -53,11 +53,16 @@
 	"devEngines": {
 		"packageManager": {
 			"name": "pnpm",
-			"version": "12.18.0",
+			"version": "12.21.0",
+			"onFail": "download"
+		},
+		"runtime": {
+			"name": "node",
+			"version": "^26.13.1",
 			"onFail": "download"
 		}
 	},
-	"packageManager": "pnpm@12.18.0",
+	"packageManager": "pnpm@12.21.0",
 	"type": "module",
 	"peerDependencies": {
 		"astro": "^7.4.6",
@@ -69,12 +74,12 @@
 		}
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.6.6",
+		"@biomejs/biome": "2.6.8",
 		"@types/node": "^26.6.6",
 		"@types/node-zopfli-es": "^0.0.4",
 		"@types/picomatch": "^4.0.3",
 		"@vitest/coverage-v8": "^5.1.0",
-		"astro": "^7.4.6",
+		"astro": "7.4.12",
 		"node-zopfli-es": "^2.0.6",
 		"typescript": "^7.0.2",
 		"vitest": "^5.1.0"
