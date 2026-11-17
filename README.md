@@ -122,6 +122,12 @@ pnpm add -D node-zopfli-es
 yarn add -D node-zopfli-es
 ```
 
+> [!TIP] The default settings used by `astro-precompressor` have been tuned for
+> speed without sacrificing compression. Unless gzip output is not needed or
+> there is a compelling reason to avoid the extra dependency, installing
+> `node-zopfli-es` alongside `astro-precompressor` is highly recommended. See
+> the Gzip section under [Algorithms](#compression-algorithms) for more details.
+
 ## Usage
 
 Import the integration into your Astro configuration and add it as the last item
@@ -231,12 +237,14 @@ gzip: {
 ```
 
 > [!TIP] While higher `numiterations` can produce smaller file sizes, it does so
-> at the expense of speed. 15 is often considered a good default, but did not
+> at the expense of speed. 15 (the normal default) is common, but did not
 > meaningfully affect the final compression ratios in testing while taking 3
-> times longer. `numiterations: 5` already produces a smaller output than `zlib`
-> in most cases while running at a similar speed. `blocksplitting` has also been
-> turned off for a similar reason. Feel free to experiment if maximum gzip
-> compression is a priority for you rather than relying on `brotli`.
+> times longer. The tests revealed that, for representative minified Astro
+> output files, `numiterations: 5` produced files that were identical in size to
+> `numiterations: 15`, always smaller than `zlib` while only being slightly
+> slower than `zlib`. `blocksplitting` has also been turned off for a similar
+> reason. Feel free to experiment if maximum gzip compression is a priority for
+> you rather than relying on `brotli`.
 
 Even with the package installed, Zopfli can be explicitly disabled by providing
 custom `zlib` compression options or setting `algorithms.gzip.zopfli` to
@@ -270,10 +278,11 @@ brotli: {
 
 #### Zstandard
 
-Since Brotli generally achieves better compression ratios for web assets (at the
-expense of speed) and has been available in browsers for longer, it should be
-preferred. Zstandard is instead an attractive middleware on server rendered
-pages where compression speed and resource usage matters more.
+Since Brotli generally achieves better compression ratios than Zstandard for web
+assets (at the expense of speed) and has been available in browsers for longer,
+it is the preferred option for precompression. Zstandard is instead an
+attractive middleware option on server rendered pages where compression speed
+and resource usage often matter more.
 
 This integration is exclusively for precompressing static assets. Zstandard is
 therefore disabled by default. It can, however, be enabled by setting its
@@ -414,7 +423,7 @@ performance: {
 
 The default value for `concurrency` is set automatically based on the number of
 logical processors that Node.js reports as available. This is usually optimal,
-but lower values may use slightly less memory at the expense of speed.
+but lower values may use less memory at the expense of speed.
 
 When `incremental` is enabled, compression artifacts are retained in the cache
 along with a hash of the source file. While this may marginally slow down
@@ -527,10 +536,10 @@ Zstandard, since that algorithm is disabled by default.
 # SERVE COMPRESSED FILES
 
 ## brotli
-RewriteCond %{HTTP:Accept-encoding} \bbr\b(?!\s*;\s*q=0(?:\.0{1,3})?\b)
+RewriteCond %{HTTP:Accept-encoding} \bbr\b(?!\s*;\s*q=0(?:\.0{1,3})?(?=\s*(?:,|$))) [NC]
 RewriteCond %{REQUEST_URI} \.(html?|css|(c|m)?js|svg|json|xml|rss|atom|txt|ttf|otf|eot)$ [NC]
 RewriteCond %{REQUEST_FILENAME}.br -s [NC]
-RewriteRule ^(.+) $1.br [QSA]
+RewriteRule ^(.+) $1.br
 <FilesMatch "\.(html?|css|(c|m)?js|svg|json|xml|rss|atom|txt|ttf|otf|eot)\.br$">
 	### Prevent Apache from interpreting .br as a language extension
 	RemoveLanguage .br
@@ -538,10 +547,10 @@ RewriteRule ^(.+) $1.br [QSA]
 </FilesMatch>
 
 ## gzip
-RewriteCond %{HTTP:Accept-encoding} \bgzip\b(?!\s*;\s*q=0(?:\.0{1,3})?\b)
+RewriteCond %{HTTP:Accept-encoding} \bgzip\b(?!\s*;\s*q=0(?:\.0{1,3})?(?=\s*(?:,|$))) [NC]
 RewriteCond %{REQUEST_URI} \.(html?|css|(c|m)?js|svg|json|xml|rss|atom|txt|ttf|otf|eot)$ [NC]
 RewriteCond %{REQUEST_FILENAME}.gz -s [NC]
-RewriteRule ^(.+) $1.gz [QSA]
+RewriteRule ^(.+) $1.gz
 <FilesMatch "\.(html?|css|(c|m)?js|svg|json|xml|rss|atom|txt|ttf|otf|eot)\.gz$">
 	Header merge Content-Encoding gzip
 </FilesMatch>
@@ -571,9 +580,9 @@ RewriteRule \.eot\.(br|gz)$ - [T=application/vnd.ms-fontobject,E=no-brotli:1,E=n
 
 > [!WARNING] The `.htaccess` configuration above is representative and does not
 > guard against a missing `mod_rewrite`. It assumes `mod_headers` and `mod_mime`
-> are available and does not fully account for `Accept-Encoding` quality values,
-> though it will respect if an encoding is explicitly disabled with `;q=0`.
-> Always test before using it in your production environment.
+> are available. The encoding conditions reject explicitly disabled encodings
+> (q=0), but do not implement complete quality-value negotiation or wildcard
+> handling. Always test before using it in a production environment.
 
 ### Nginx
 

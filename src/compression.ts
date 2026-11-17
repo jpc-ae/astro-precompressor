@@ -71,7 +71,9 @@ async function generateCompressedFile(
 	algorithm: CompressionAlgorithm,
 	options: ResolvedAlgorithmOptions,
 	zopfli: ZopfliModule | undefined,
-): Promise<void> {
+): Promise<number> {
+	const start = performance.now()
+
 	await mkdir(dirname(destination), {
 		recursive: true,
 	})
@@ -90,6 +92,8 @@ async function generateCompressedFile(
 		)
 
 		await rename(temporaryPath, destination)
+
+		return performance.now() - start
 	} catch (error) {
 		await rm(temporaryPath, { force: true }).catch(() => {})
 		throw error
@@ -113,8 +117,6 @@ async function processAlgorithm(
 	zopfli: ZopfliModule | undefined,
 	semaphore: Semaphore,
 ): Promise<CompressionResult> {
-	const start = performance.now()
-
 	const extension = ALGORITHM_EXTENSIONS[algorithm]
 
 	const cachePath = getArtifactPath(artifactDirectory, relativePath, extension)
@@ -127,12 +129,14 @@ async function processAlgorithm(
 
 	log(logger, options, 2, `${relativePath}: ${algorithm} cache ${cached ? 'hit' : 'miss'}`)
 
+	let elapsed = 0
+
 	if (!cached) {
 		log(logger, options, 2, `${relativePath}: Starting ${algorithm} compression`)
 
-		await semaphore.run(() =>
-			generateCompressedFile(sourcePath, cachePath, algorithm, options.algorithms, zopfli),
-		)
+		elapsed = await semaphore.run(() => {
+			return generateCompressedFile(sourcePath, cachePath, algorithm, options.algorithms, zopfli)
+		})
 
 		log(logger, options, 2, `${relativePath}: ${algorithm} compression complete`)
 	}
@@ -153,8 +157,6 @@ async function processAlgorithm(
 	} else {
 		await copyPreservingTimestamps(cachePath, outputPath)
 	}
-
-	const elapsed = performance.now() - start
 
 	log(logger, options, 2, `${relativePath}: ${algorithm} processed in ${formatDuration(elapsed)}`)
 

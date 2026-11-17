@@ -169,7 +169,7 @@ export const DEFAULT_BROTLI_OPTIONS: BrotliOptions = {
 
 export const DEFAULT_ZSTD_OPTIONS: ZstdOptions = {
 	params: {
-		[constants.ZSTD_c_compressionLevel]: 22,
+		[constants.ZSTD_c_compressionLevel]: 19,
 	},
 }
 
