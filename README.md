@@ -527,7 +527,7 @@ Zstandard, since that algorithm is disabled by default.
 # SERVE COMPRESSED FILES
 
 ## brotli
-RewriteCond %{HTTP:Accept-encoding} br
+RewriteCond %{HTTP:Accept-encoding} \bbr\b(?!\s*;\s*q=0(?:\.0{1,3})?\b)
 RewriteCond %{REQUEST_URI} \.(html?|css|(c|m)?js|svg|json|xml|rss|atom|txt|ttf|otf|eot)$ [NC]
 RewriteCond %{REQUEST_FILENAME}.br -s [NC]
 RewriteRule ^(.+) $1.br [QSA]
@@ -538,7 +538,7 @@ RewriteRule ^(.+) $1.br [QSA]
 </FilesMatch>
 
 ## gzip
-RewriteCond %{HTTP:Accept-encoding} gzip
+RewriteCond %{HTTP:Accept-encoding} \bgzip\b(?!\s*;\s*q=0(?:\.0{1,3})?\b)
 RewriteCond %{REQUEST_URI} \.(html?|css|(c|m)?js|svg|json|xml|rss|atom|txt|ttf|otf|eot)$ [NC]
 RewriteCond %{REQUEST_FILENAME}.gz -s [NC]
 RewriteRule ^(.+) $1.gz [QSA]
@@ -571,8 +571,9 @@ RewriteRule \.eot\.(br|gz)$ - [T=application/vnd.ms-fontobject,E=no-brotli:1,E=n
 
 > [!WARNING] The `.htaccess` configuration above is representative and does not
 > guard against a missing `mod_rewrite`. It assumes `mod_headers` and `mod_mime`
-> are available, and does not account for `Accept-Encoding` quality values such
-> as `;q=0`. Always test before using it in your production environment.
+> are available and does not fully account for `Accept-Encoding` quality values,
+> though it will respect if an encoding is explicitly disabled with `;q=0`.
+> Always test before using it in your production environment.
 
 ### Nginx
 
