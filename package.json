@@ -67,8 +67,8 @@
 	"packageManager": "pnpm@12.21.0",
 	"type": "module",
 	"peerDependencies": {
-		"astro": "^7.4.6",
-		"node-zopfli-es": "^2.0.6"
+		"astro": ">=5.0.0",
+		"node-zopfli-es": ">=2.0.0"
 	},
 	"peerDependenciesMeta": {
 		"node-zopfli-es": {

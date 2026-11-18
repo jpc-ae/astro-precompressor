@@ -1,0 +1,1 @@
+This public text file should be included by the file type filter. Repeated text makes it large enough to be useful for compression testing.
