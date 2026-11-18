@@ -374,7 +374,6 @@ describe('runBuild', () => {
 		await createFile(outputDirectory, 'two.html')
 
 		mockedCompressFile.mockRejectedValueOnce(new Error('first file failed')).mockResolvedValueOnce({
-			elapsed: 1,
 			compressions: [
 				{
 					algorithm: 'gzip',
