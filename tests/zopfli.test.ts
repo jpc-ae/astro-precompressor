@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { gunzipSync } from 'node:zlib'
 import { Readable, Transform } from 'node:stream'
 
-import { loadZopfli, loadOptionalZopfli } from '../src/zopfli.js'
+import { loadZopfli, loadOptionalZopfli } from '../src/gzip.js'
 
 describe('Zopfli', () => {
 	afterEach(() => {
@@ -35,7 +35,7 @@ describe('Zopfli', () => {
 				throw new Error('Module unavailable')
 			})
 
-			const { loadZopfli: load } = await import('../src/zopfli.js')
+			const { loadZopfli: load } = await import('../src/gzip.js')
 
 			await expect(load()).rejects.toThrow()
 		})

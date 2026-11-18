@@ -1,15 +1,6 @@
 import { availableParallelism } from 'node:os'
 
-import type {
-	ZlibOptions,
-	BrotliOptions,
-	ZstdOptions,
-	ZopfliOptions,
-	CompressionOptions,
-	LogLevel,
-} from './types.js'
-
-import { constants } from 'node:zlib'
+import type { CompressionOptions, LogLevel } from './types.js'
 
 export const INTEGRATION_NAME = 'astro-precompressor'
 
@@ -155,27 +146,5 @@ export const ALGORITHM_EXTENSIONS = {
 	brotli: '.br',
 	zstd: '.zst',
 } as const satisfies Record<(typeof SUPPORTED_ALGORITHMS)[number], string>
-
-export const DEFAULT_ZLIB_OPTIONS: ZlibOptions = {
-	level: constants.Z_BEST_COMPRESSION,
-	memLevel: constants.Z_MAX_MEMLEVEL,
-}
-
-export const DEFAULT_BROTLI_OPTIONS: BrotliOptions = {
-	params: {
-		[constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY,
-	},
-}
-
-export const DEFAULT_ZSTD_OPTIONS: ZstdOptions = {
-	params: {
-		[constants.ZSTD_c_compressionLevel]: 19,
-	},
-}
-
-export const DEFAULT_ZOPFLI_OPTIONS: ZopfliOptions = {
-	numiterations: 5,
-	blocksplitting: false,
-}
 
 export const DEFAULT_LOG_LEVEL: LogLevel = 2 as const

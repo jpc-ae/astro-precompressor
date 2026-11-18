@@ -34,10 +34,10 @@ import {
 import type {
 	BuildStats,
 	CompressionAlgorithm,
+	Compressors,
 	FilterOptions,
 	Logger,
 	ResolvedOptions,
-	ZopfliModule,
 } from './types.js'
 
 // -----------------------------------------------------------------------------
@@ -204,7 +204,7 @@ export async function runBuild(
 	configHash: string,
 	options: ResolvedOptions,
 	logger: Logger,
-	zopfli: ZopfliModule | undefined,
+	compressors: Compressors,
 ): Promise<void> {
 	const buildStart = performance.now()
 
@@ -304,7 +304,15 @@ export async function runBuild(
 	// Remove sidecars belonging to algorithms that are no
 	// longer configured.
 	for (const file of eligibleFiles) {
-		await removeDisabledArtifacts(file.key, artifactDirectory, options.algorithms)
+		try {
+			await removeDisabledArtifacts(file.key, artifactDirectory, options.algorithms)
+		} catch (error) {
+			stats.errors.push(
+				new Error(`Failed to remove disabled artifacts for ${file.key}`, {
+					cause: error,
+				}),
+			)
+		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -340,7 +348,7 @@ export async function runBuild(
 					forceRecompress,
 					options,
 					logger,
-					zopfli,
+					compressors,
 					semaphore,
 				)
 

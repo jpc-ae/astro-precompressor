@@ -212,7 +212,7 @@ describe('precompressor integration', () => {
 		)
 
 		vi.doMock('../src/zopfli.js', async importOriginal => {
-			const actual = await importOriginal<typeof import('../src/zopfli.js')>()
+			const actual = await importOriginal<typeof import('../src/gzip.js')>()
 
 			return {
 				...actual,

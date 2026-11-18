@@ -68,10 +68,14 @@
 	"type": "module",
 	"peerDependencies": {
 		"astro": ">=5.0.0",
-		"node-zopfli-es": ">=2.0.0"
+		"node-zopfli-es": ">=2.0.0",
+		"zstd-napi": ">=0.0.12"
 	},
 	"peerDependenciesMeta": {
 		"node-zopfli-es": {
+			"optional": true
+		},
+		"zstd-napi": {
 			"optional": true
 		}
 	},
@@ -84,7 +88,8 @@
 		"astro": "7.4.12",
 		"node-zopfli-es": "^2.0.6",
 		"typescript": "^7.0.2",
-		"vitest": "^5.1.0"
+		"vitest": "^5.1.0",
+		"zstd-napi": ">=0.0.12"
 	},
 	"dependencies": {
 		"picomatch": "^4.0.7"

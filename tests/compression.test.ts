@@ -10,7 +10,7 @@ import { getArtifactPath } from '../src/cache.js'
 
 import { createFile, createLogger, createOptions, useTempDirectory } from './helpers.js'
 
-import { DEFAULT_ZLIB_OPTIONS } from '../src/constants.js'
+import { DEFAULT_ZLIB_OPTIONS } from '../src/gzip.js'
 
 function createCompressibleContent(label: string): string {
 	return `<html><body>${label}</body></html>\n`.repeat(100)

@@ -1,7 +1,3 @@
-import { createGzip, createBrotliCompress } from 'node:zlib'
-
-import { createZstdCompress } from './zstd.js'
-
 import { createReadStream, createWriteStream } from 'node:fs'
 
 import { mkdir, rename, rm, stat } from 'node:fs/promises'
@@ -23,45 +19,14 @@ import type { Semaphore } from './semaphore.js'
 import type {
 	CompressionAlgorithm,
 	CompressionResult,
+	CompressorFactory,
+	Compressors,
 	Logger,
-	ResolvedAlgorithmOptions,
 	ResolvedOptions,
-	ZopfliModule,
 } from './types.js'
 
-import { ALGORITHM_EXTENSIONS } from './constants.js'
-
-// -----------------------------------------------------------------------------
-// Compressor factory
-// -----------------------------------------------------------------------------
-
-function createCompressor(
-	algorithm: CompressionAlgorithm,
-	options: ResolvedAlgorithmOptions,
-	zopfli: ZopfliModule | undefined,
-) {
-	if (algorithm === 'gzip' && options.gzip) {
-		if ('zopfli' in options.gzip) {
-			if (!zopfli) {
-				throw new Error('Zopfli module has not been initialized.')
-			}
-
-			return zopfli.createGzip(options.gzip.zopfli)
-		}
-
-		return createGzip(options.gzip)
-	}
-
-	if (algorithm === 'brotli' && options.brotli) {
-		return createBrotliCompress(options.brotli)
-	}
-
-	if (algorithm === 'zstd' && options.zstd) {
-		return createZstdCompress(options.zstd)
-	}
-
-	throw new Error('Invalid compression context.')
-}
+import { ALGORITHM_EXTENSIONS, INTEGRATION_NAME } from './constants.js'
+import type { Transform } from 'node:stream'
 
 // -----------------------------------------------------------------------------
 // Generate compressed output
@@ -70,9 +35,7 @@ function createCompressor(
 async function generateCompressedFile(
 	sourcePath: string,
 	destination: string,
-	algorithm: CompressionAlgorithm,
-	options: ResolvedAlgorithmOptions,
-	zopfli: ZopfliModule | undefined,
+	compressor: Transform,
 ): Promise<number> {
 	const start = performance.now()
 
@@ -83,8 +46,6 @@ async function generateCompressedFile(
 	const temporaryPath = `${destination}.${randomUUID()}.tmp`
 
 	try {
-		const compressor = createCompressor(algorithm, options, zopfli)
-
 		await pipeline(
 			createReadStream(sourcePath),
 			compressor,
@@ -116,7 +77,7 @@ async function processAlgorithm(
 	forceRecompress: boolean,
 	options: ResolvedOptions,
 	logger: Logger,
-	zopfli: ZopfliModule | undefined,
+	compressorFactory: CompressorFactory,
 	semaphore: Semaphore,
 ): Promise<CompressionResult> {
 	const extension = ALGORITHM_EXTENSIONS[algorithm]
@@ -136,8 +97,9 @@ async function processAlgorithm(
 	if (!cached) {
 		log(logger, options, 2, `${relativePath}: Starting ${algorithm} compression`)
 
-		elapsed = await semaphore.run(() => {
-			return generateCompressedFile(sourcePath, cachePath, algorithm, options.algorithms, zopfli)
+		elapsed = await semaphore.run(async () => {
+			const compressor = await compressorFactory()
+			return generateCompressedFile(sourcePath, cachePath, compressor)
 		})
 
 		log(logger, options, 2, `${relativePath}: ${algorithm} compression complete`)
@@ -184,7 +146,7 @@ export async function compressFile(
 	forceRecompress: boolean,
 	options: ResolvedOptions,
 	logger: Logger,
-	zopfli: ZopfliModule | undefined,
+	compressors: Compressors,
 	semaphore: Semaphore,
 ): Promise<{
 	compressions: CompressionResult[]
@@ -198,18 +160,25 @@ export async function compressFile(
 			continue
 		}
 
+		const typedAlgorithm = algorithm as keyof typeof options.algorithms
+		if (!compressors[typedAlgorithm]) {
+			throw new Error(
+				`[${INTEGRATION_NAME}] Error: the ${typedAlgorithm} compressor could not be found`,
+			)
+		}
+
 		processors.push(
 			processAlgorithm(
 				sourcePath,
 				artifactDirectory,
 				relativePath,
-				algorithm as keyof typeof options.algorithms,
+				typedAlgorithm,
 				currentHash,
 				cachedHash,
 				forceRecompress,
 				options,
 				logger,
-				zopfli,
+				compressors[typedAlgorithm],
 				semaphore,
 			),
 		)

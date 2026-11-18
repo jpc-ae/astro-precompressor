@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, vi } from 'vitest'
 
 import type { Logger, ResolvedOptions } from '../src/types.js'
-import { DEFAULT_ZLIB_OPTIONS } from '../src/constants.js'
+import { DEFAULT_ZLIB_OPTIONS } from '../src/gzip.js'
 
 export function createLogger(): Logger {
 	const logger = {
