@@ -1,5 +1,5 @@
 {
-	"name": "astro-precompressor-integration-fixture",
+	"name": "astro-precompressor-fixture-minimum",
 	"private": true,
 	"type": "module",
 	"devDependencies": {

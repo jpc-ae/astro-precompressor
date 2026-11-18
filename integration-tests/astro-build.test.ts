@@ -22,7 +22,6 @@ interface Fixture {
 }
 
 interface FixtureContext extends Fixture {
-	nodeModules: string
 	output: string
 	cache: string
 }
@@ -64,7 +63,6 @@ async function ensureFixtureDependencies(fixture: Fixture): Promise<string> {
 function createFixtureContext(fixture: Fixture): FixtureContext {
 	return {
 		...fixture,
-		nodeModules: resolve(fixture.directory, 'node_modules'),
 		output: resolve(fixture.directory, 'dist'),
 		cache: resolve(fixture.directory, '.site-cache'),
 	}
