@@ -24,6 +24,8 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage",
+		"test:integration": "pnpm build && vitest run --config integration-tests/vitest.config.ts",
+		"test:all": "pnpm test && pnpm test:integration",
 		"prepack": "pnpm build",
 		"prepublishOnly": "pnpm test"
 	},
