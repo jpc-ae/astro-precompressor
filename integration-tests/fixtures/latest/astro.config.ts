@@ -43,7 +43,7 @@ const configurations: Record<string, CompressionOptions> = {
 			brotli: fastBrotli,
 		},
 	},
-	zstandardOnly: {
+	zstdOnly: {
 		algorithms: {
 			gzip: false,
 			brotli: false,
@@ -64,6 +64,12 @@ const configurations: Record<string, CompressionOptions> = {
 			fileTypes: ['.html', '.txt'],
 			minSize: 1,
 			exclude: ['ignored/**'],
+		},
+	},
+	txtOnly: {
+		algorithms: gzipOnly,
+		filters: {
+			include: ['**/*.txt'],
 		},
 	},
 	cache: {

@@ -19,7 +19,7 @@ import {
 	DEFAULT_BROTLI_OPTIONS,
 	DEFAULT_ZSTD_OPTIONS,
 	DEFAULT_ZOPFLI_OPTIONS,
-	PLUGIN_NAME,
+	INTEGRATION_NAME,
 	DEFAULT_MIN_SIZE,
 	SILLY_FILE_TYPES,
 	DEFAULT_ALGORITHMS,
@@ -29,6 +29,7 @@ import {
 import { createConfigHash, normalizeExtensions, log } from './utils.js'
 import { runBuild } from './build.js'
 import { loadOptionalZopfli, loadZopfli } from './zopfli.js'
+import { checkForZstd } from './zstd.js'
 
 // -----------------------------------------------------------------------------
 // Option resolution
@@ -130,23 +131,27 @@ function resolveOptions(userOptions: CompressionOptions): ResolvedOptions {
 	}
 
 	if (!(options.algorithms.gzip || options.algorithms.brotli || options.algorithms.zstd)) {
-		throw new Error(`[${PLUGIN_NAME}] At least one compression algorithm must be enabled.`)
+		throw new Error(`[${INTEGRATION_NAME}] At least one compression algorithm must be enabled.`)
+	}
+
+	if (options.algorithms.zstd) {
+		checkForZstd()
 	}
 
 	if (!Number.isInteger(options.performance.concurrency) || options.performance.concurrency < 1) {
-		throw new Error(`[${PLUGIN_NAME}] concurrency must be a positive integer.`)
+		throw new Error(`[${INTEGRATION_NAME}] concurrency must be a positive integer.`)
 	}
 
 	if (!options.filters.fileTypes.length) {
-		throw new Error(`[${PLUGIN_NAME}] At least one file type must be provided.`)
+		throw new Error(`[${INTEGRATION_NAME}] At least one file type must be provided.`)
 	}
 
 	if (!Number.isFinite(options.filters.minSize) || options.filters.minSize < 0) {
-		throw new Error(`[${PLUGIN_NAME}] minSize must be a non-negative number.`)
+		throw new Error(`[${INTEGRATION_NAME}] minSize must be a non-negative number.`)
 	}
 
 	if (![0, 1, 2].includes(options.logLevel)) {
-		throw new Error(`[${PLUGIN_NAME}] logLevel must be 0, 1, or 2.`)
+		throw new Error(`[${INTEGRATION_NAME}] logLevel must be 0, 1, or 2.`)
 	}
 
 	return options
@@ -184,7 +189,7 @@ export default function precompressor(userOptions: CompressionOptions = {}): Ast
 	let configHash: string | undefined
 
 	return {
-		name: PLUGIN_NAME,
+		name: INTEGRATION_NAME,
 
 		hooks: {
 			'astro:config:setup': async ({ config, logger }) => {
@@ -216,7 +221,7 @@ export default function precompressor(userOptions: CompressionOptions = {}): Ast
 
 			'astro:build:done': async ({ dir, logger }) => {
 				if (!cacheDirectory || !configHash) {
-					throw new Error(`[${PLUGIN_NAME}] Integration was not initialized correctly.`)
+					throw new Error(`[${INTEGRATION_NAME}] Integration was not initialized correctly.`)
 				}
 
 				await runBuild(fileURLToPath(dir), cacheDirectory, configHash, options, logger, zopfli)

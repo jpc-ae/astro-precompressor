@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { brotliDecompressSync, gunzipSync } from 'node:zlib'
+import { brotliDecompressSync, gunzipSync, zstdDecompressSync } from 'node:zlib'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const integrationDirectory = dirname(fileURLToPath(import.meta.url))
@@ -47,7 +47,7 @@ async function ensureFixtureDependencies(fixture: Fixture): Promise<string> {
 	if (fixture.expectedVersion && astroPackage.version !== fixture.expectedVersion) {
 		throw new Error(
 			`Expected Astro ${fixture.expectedVersion}, found ${astroPackage.version}. ` +
-				`Run pnpm --dir ${fixture.directory} install --ignore-workspace.`,
+				`Run pnpm --dir ${fixture.directory} install.`,
 		)
 	}
 
@@ -151,7 +151,21 @@ function testAstroFixture(fixtureDefinition: Fixture): void {
 			expect(brotli.equals(original)).toBe(true)
 		})
 
-		it('respects algorithm configuration and does not emit disabled algorithms', async () => {
+		it('respects algorithm configuration and does not emit disabled algorithms (gzip only)', async () => {
+			await cleanBuildArtifacts(fixture)
+			await build('gzipOnly')
+
+			const original = await readOutput(fixture, 'index.html')
+			const gzip = gunzipSync(await readOutput(fixture, 'index.html.gz'))
+
+			expect(gzip.equals(original)).toBe(true)
+
+			await expect(readOutput(fixture, 'index.html.br')).rejects.toMatchObject({ code: 'ENOENT' })
+
+			await expect(readOutput(fixture, 'index.html.zst')).rejects.toMatchObject({ code: 'ENOENT' })
+		})
+
+		it('respects algorithm configuration and does not emit disabled algorithms (brotli only)', async () => {
 			await cleanBuildArtifacts(fixture)
 			await build('brotliOnly')
 
@@ -161,6 +175,34 @@ function testAstroFixture(fixtureDefinition: Fixture): void {
 			expect(brotli.equals(original)).toBe(true)
 
 			await expect(readOutput(fixture, 'index.html.gz')).rejects.toMatchObject({ code: 'ENOENT' })
+
+			await expect(readOutput(fixture, 'index.html.zst')).rejects.toMatchObject({ code: 'ENOENT' })
+		})
+
+		it('respects algorithm configuration and does not emit disabled algorithms (zstd only)', async () => {
+			await cleanBuildArtifacts(fixture)
+			await build('zstdOnly')
+
+			const original = await readOutput(fixture, 'index.html')
+			const zstd = zstdDecompressSync(await readOutput(fixture, 'index.html.zst'))
+
+			expect(zstd.equals(original)).toBe(true)
+
+			await expect(readOutput(fixture, 'index.html.gz')).rejects.toMatchObject({ code: 'ENOENT' })
+
+			await expect(readOutput(fixture, 'index.html.br')).rejects.toMatchObject({ code: 'ENOENT' })
+		})
+
+		it('respects algorithm configuration and does not emit disabled algorithms (zopfli only)', async () => {
+			await cleanBuildArtifacts(fixture)
+			await build('zopfliOnly')
+
+			const original = await readOutput(fixture, 'index.html')
+			const gzip = gunzipSync(await readOutput(fixture, 'index.html.gz'))
+
+			expect(gzip.equals(original)).toBe(true)
+
+			await expect(readOutput(fixture, 'index.html.br')).rejects.toMatchObject({ code: 'ENOENT' })
 
 			await expect(readOutput(fixture, 'index.html.zst')).rejects.toMatchObject({ code: 'ENOENT' })
 		})
@@ -187,6 +229,33 @@ function testAstroFixture(fixtureDefinition: Fixture): void {
 			const compressed = gunzipSync(await readOutput(fixture, 'included.txt.gz'))
 
 			expect(compressed.equals(included)).toBe(true)
+		})
+
+		it('respects include patterns', async () => {
+			await cleanBuildArtifacts(fixture)
+			await build('txtOnly')
+
+			// .txt is in the default file types and included explicitly.
+			await expect(readOutput(fixture, 'included.txt.gz')).resolves.toBeInstanceOf(Buffer)
+			await expect(readOutput(fixture, 'ignored/ignored.txt.gz')).resolves.toBeInstanceOf(Buffer)
+
+			// .html and .bin do not match the include pattern
+			await expect(readOutput(fixture, 'index.html.gz')).rejects.toMatchObject({
+				code: 'ENOENT',
+			})
+			await expect(readOutput(fixture, 'unmatched.bin.gz')).rejects.toMatchObject({
+				code: 'ENOENT',
+			})
+
+			const included = await readOutput(fixture, 'included.txt')
+			const compressed = gunzipSync(await readOutput(fixture, 'included.txt.gz'))
+
+			expect(compressed.equals(included)).toBe(true)
+
+			const nestedIncluded = await readOutput(fixture, 'ignored/included.txt')
+			const nestedCompressed = gunzipSync(await readOutput(fixture, 'ignored/included.txt.gz'))
+
+			expect(nestedCompressed.equals(nestedIncluded)).toBe(true)
 		})
 
 		it('reuses cached artifacts across builds and regenerates only changed files', async () => {

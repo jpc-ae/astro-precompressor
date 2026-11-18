@@ -8,7 +8,7 @@ import { performance } from 'node:perf_hooks'
 
 import picomatch from 'picomatch'
 
-import { ALGORITHM_EXTENSIONS, PLUGIN_NAME, SUPPORTED_ALGORITHMS } from './constants.js'
+import { ALGORITHM_EXTENSIONS, INTEGRATION_NAME, SUPPORTED_ALGORITHMS } from './constants.js'
 
 import { runWorkerPool } from './worker-pool.js'
 
@@ -210,7 +210,7 @@ export async function runBuild(
 
 	const outputDirectoryHash = createHash('sha256').update(resolve(outputDirectory)).digest('hex')
 
-	const pluginCacheDirectory = join(cacheDirectory, PLUGIN_NAME)
+	const pluginCacheDirectory = join(cacheDirectory, INTEGRATION_NAME)
 
 	const manifestPath = join(pluginCacheDirectory, `${outputDirectoryHash}.json`)
 
@@ -457,7 +457,9 @@ export async function runBuild(
 	}
 
 	if (stats.errors.length > 0 && options.failOnError) {
-		throw new Error(`[${PLUGIN_NAME}] Compression failed for ${stats.errors.length} operation(s).`)
+		throw new Error(
+			`[${INTEGRATION_NAME}] Compression failed for ${stats.errors.length} operation(s).`,
+		)
 	}
 
 	logger.info(bold('Done!'))

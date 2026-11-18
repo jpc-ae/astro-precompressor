@@ -1,4 +1,6 @@
-import { createGzip, createBrotliCompress, createZstdCompress } from 'node:zlib'
+import { createGzip, createBrotliCompress } from 'node:zlib'
+
+import { createZstdCompress } from './zstd.js'
 
 import { createReadStream, createWriteStream } from 'node:fs'
 

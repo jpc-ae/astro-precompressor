@@ -11,7 +11,7 @@ import type {
 
 import { constants } from 'node:zlib'
 
-export const PLUGIN_NAME = 'astro-precompressor'
+export const INTEGRATION_NAME = 'astro-precompressor'
 
 /** Cache serial, increase to force recompression on update */
 export const CACHE_VERSION = 1

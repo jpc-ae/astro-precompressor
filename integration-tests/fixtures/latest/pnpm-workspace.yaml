@@ -1,3 +1,4 @@
 allowBuilds:
+  node-zopfli-es: true
   esbuild: true
   sharp: true

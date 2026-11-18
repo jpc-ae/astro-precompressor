@@ -24,7 +24,7 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage",
-		"test:integration": "pnpm --dir integration-tests/fixtures/minimum install --frozen-lockfile --ignore-workspace && pnpm --dir integration-tests/fixtures/latest install --frozen-lockfile --ignore-workspace && pnpm build && vitest run --config integration-tests/vitest.config.ts",
+		"test:integration": "pnpm --dir integration-tests/fixtures/minimum install --frozen-lockfile && pnpm --dir integration-tests/fixtures/latest install --frozen-lockfile && pnpm build && vitest run --config integration-tests/vitest.config.ts",
 		"test:all": "pnpm test && pnpm test:integration",
 		"prepack": "pnpm build",
 		"prepublishOnly": "pnpm test"
