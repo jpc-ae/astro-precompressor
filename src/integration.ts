@@ -4,8 +4,6 @@ import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 
 import type {
-	BrotliOptions,
-	ZstdOptions,
 	CompressionOptions,
 	ResolvedOptions,
 	ZopfliOptions,
@@ -35,6 +33,26 @@ import { loadOptionalZopfli, loadZopfli } from './zopfli.js'
 // -----------------------------------------------------------------------------
 // Option resolution
 // -----------------------------------------------------------------------------
+
+function mergeOptions<T extends object>(defaultOptions: T, userOptions: true | T): T {
+	if (userOptions === true) {
+		return defaultOptions
+	}
+
+	const options: T = {
+		...defaultOptions,
+		...userOptions,
+	}
+
+	for (const prop in defaultOptions) {
+		options[prop] = {
+			...defaultOptions[prop],
+			...userOptions[prop],
+		}
+	}
+
+	return options
+}
 
 function resolveZopfliOptions(value?: boolean | ZopfliOptions): false | ZopfliOptions {
 	if (!value) {
@@ -77,12 +95,7 @@ function resolveBrotliOptions(
 		return false
 	}
 
-	const options: BrotliOptions = {
-		...DEFAULT_BROTLI_OPTIONS,
-		...(typeof value === 'object' ? value : {}),
-	}
-
-	return options
+	return mergeOptions(DEFAULT_BROTLI_OPTIONS, value)
 }
 
 function resolveZstdOptions(value: AlgorithmOptions['zstd']): ResolvedAlgorithmOptions['zstd'] {
@@ -90,12 +103,7 @@ function resolveZstdOptions(value: AlgorithmOptions['zstd']): ResolvedAlgorithmO
 		return false
 	}
 
-	const options: ZstdOptions = {
-		...DEFAULT_ZSTD_OPTIONS,
-		...(typeof value === 'object' ? value : {}),
-	}
-
-	return options
+	return mergeOptions(DEFAULT_ZSTD_OPTIONS, value)
 }
 
 function resolveOptions(userOptions: CompressionOptions): ResolvedOptions {

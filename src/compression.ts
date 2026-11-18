@@ -164,7 +164,7 @@ async function processAlgorithm(
 		algorithm,
 		elapsed,
 		generated: !cached,
-		size: discarded ? 0 : compressedStats.size,
+		size: compressedStats.size,
 		discarded,
 	}
 }
