@@ -34,24 +34,19 @@ import { loadOptionalZopfli, loadZopfli } from './zopfli.js'
 // Option resolution
 // -----------------------------------------------------------------------------
 
-function mergeOptions<T extends object>(defaultOptions: T, userOptions: true | T): T {
+function mergeOptions<T extends { params?: object }>(defaultOptions: T, userOptions: true | T): T {
 	if (userOptions === true) {
-		return defaultOptions
+		return { ...defaultOptions }
 	}
 
-	const options: T = {
+	return {
 		...defaultOptions,
 		...userOptions,
+		params: {
+			...defaultOptions.params,
+			...userOptions.params,
+		},
 	}
-
-	for (const prop in defaultOptions) {
-		options[prop] = {
-			...defaultOptions[prop],
-			...userOptions[prop],
-		}
-	}
-
-	return options
 }
 
 function resolveZopfliOptions(value?: boolean | ZopfliOptions): false | ZopfliOptions {

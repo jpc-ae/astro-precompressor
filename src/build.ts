@@ -153,15 +153,19 @@ function logFileResult(
 		elapsed: number
 		generated: boolean
 		size: number
+		discarded: boolean
 	}[],
 ): void {
 	for (const result of compressions) {
 		const extension = ALGORITHM_EXTENSIONS[result.algorithm]
+
 		const savings = sourceSize > 0 ? ((1 - result.size / sourceSize) * 100).toFixed(1) : '0.0'
 
-		const status = result.generated
-			? `${formatBytes(sourceSize)} → ${formatBytes(result.size)} (-${savings}%) in ${formatDuration(result.elapsed)}`
-			: `(reused cache entry) (${formatBytes(result.size)})`
+		const status = result.discarded
+			? `${formatBytes(sourceSize)} → ${formatBytes(result.size)} (-${savings}%) (discarded)`
+			: result.generated
+				? `${formatBytes(sourceSize)} → ${formatBytes(result.size)} (-${savings}%) in ${formatDuration(result.elapsed)}`
+				: `(reused cache entry) (${formatBytes(result.size)})`
 
 		log(logger.fork(''), options, 1, `  ${green('▶')} ${filePath}${extension} ${dim(status)}`)
 	}
@@ -171,7 +175,7 @@ function logStatistics(logger: Logger, stats: BuildStats): void {
 	for (const algorithm of SUPPORTED_ALGORITHMS) {
 		const result = stats.algorithms[algorithm]
 
-		if (result.generated === 0 && result.bytes === 0) {
+		if (result.generated === 0 && result.bytes === 0 && result.discarded === 0) {
 			continue
 		}
 
@@ -179,7 +183,7 @@ function logStatistics(logger: Logger, stats: BuildStats): void {
 			stats.sourceBytes > 0 ? ((1 - result.bytes / stats.sourceBytes) * 100).toFixed(1) : '0.0'
 
 		logger.info(
-			`${algorithm}: ${result.generated} generated | ${formatBytes(result.bytes)} (-${savings}%) | ${formatDuration(result.elapsed)} combined processing time`,
+			`${algorithm}: ${result.generated} generated | ${formatBytes(result.bytes)} emitted (-${savings}%) | ${result.discarded} discarded | ${formatDuration(result.elapsed)} combined processing time`,
 		)
 	}
 
@@ -359,10 +363,14 @@ export async function runBuild(
 				for (const compression of result.compressions) {
 					const algorithmStats = stats.algorithms[compression.algorithm]
 
-					algorithmStats.bytes += compression.size
+					// Only count files actually emitted into the build output.
+					if (!compression.discarded) {
+						algorithmStats.bytes += compression.size
+					}
+
 					algorithmStats.elapsed += compression.elapsed
 
-					// Also add up the combined processing time
+					// Also add up the combined processing time.
 					stats.elapsed += compression.elapsed
 
 					if (compression.generated) {
