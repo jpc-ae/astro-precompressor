@@ -3,16 +3,15 @@ import * as zlib from 'node:zlib'
 import { INTEGRATION_NAME } from './constants.js'
 
 import type { AlgorithmOptions, CompressorFactory, ResolvedAlgorithmOptions } from './types.js'
+import type { Transform } from 'node:stream'
 
 type ZstdNapiOptions = import('zstd-napi').CompressParameters
 
-const ZSTD_C_COMPRESSION_LEVEL = 100
-
-const DEFAULT_ZSTD_OPTIONS: zlib.ZstdOptions = {
+export const DEFAULT_ZSTD_OPTIONS = {
 	params: {
-		[ZSTD_C_COMPRESSION_LEVEL]: 19,
+		[zlib.constants.ZSTD_c_compressionLevel]: 19,
 	},
-}
+} as const satisfies zlib.ZstdOptions
 
 // -----------------------------------------------------------------------------
 // Zstandard parameter IDs
@@ -181,11 +180,15 @@ async function createZstdNapiFactory(options: zlib.ZstdOptions): Promise<Compres
 
 export async function createZstdCompressorFactory(
 	options?: zlib.ZstdOptions,
+	compressionFactory:
+		| ((options: zlib.ZstdOptions) => Transform)
+		| null
+		| undefined = zlib.createZstdCompress,
 ): Promise<CompressorFactory> {
 	const resolvedOptions = options ?? DEFAULT_ZSTD_OPTIONS
 
-	if (typeof zlib.createZstdCompress === 'function') {
-		return () => zlib.createZstdCompress(resolvedOptions)
+	if (typeof compressionFactory === 'function') {
+		return () => compressionFactory(resolvedOptions)
 	}
 
 	return createZstdNapiFactory(resolvedOptions)

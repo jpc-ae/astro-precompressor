@@ -3,11 +3,11 @@ import type { BrotliOptions } from 'node:zlib'
 
 import type { AlgorithmOptions, ResolvedAlgorithmOptions, CompressorFactory } from './types.js'
 
-export const DEFAULT_BROTLI_OPTIONS: BrotliOptions = {
+export const DEFAULT_BROTLI_OPTIONS = {
 	params: {
 		[constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY,
 	},
-}
+} as const satisfies BrotliOptions
 
 export function resolveBrotliOptions(
 	value: AlgorithmOptions['brotli'],

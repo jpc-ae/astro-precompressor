@@ -10,15 +10,15 @@ import type {
 	ZopfliOptions,
 } from './types.js'
 
-export const DEFAULT_ZLIB_OPTIONS: ZlibOptions = {
+export const DEFAULT_ZLIB_OPTIONS = {
 	level: constants.Z_BEST_COMPRESSION,
 	memLevel: constants.Z_MAX_MEMLEVEL,
-}
+} as const satisfies ZlibOptions
 
-export const DEFAULT_ZOPFLI_OPTIONS: ZopfliOptions = {
+export const DEFAULT_ZOPFLI_OPTIONS = {
 	numiterations: 5,
 	blocksplitting: false,
-}
+} as const satisfies ZopfliOptions
 
 export function resolveZopfliOptions(value?: boolean | ZopfliOptions): false | ZopfliOptions {
 	if (!value) {
@@ -56,7 +56,7 @@ export function resolveGzipOptions(
 	}
 }
 
-async function importZopfli(): Promise<ZopfliModule> {
+export async function importZopfli(): Promise<ZopfliModule> {
 	const zopfliPackage = (await import('node-zopfli-es')) as unknown as {
 		default: ZopfliModule
 	}
@@ -68,10 +68,12 @@ export async function createGzipCompressorFactory(
 	options: ZlibOptions | { zopfli: ZopfliOptions },
 	explicitZopfli: boolean,
 	optionalZopfli: boolean,
+	zopfliImporter = importZopfli,
+	zlibFactory = createGzip,
 ): Promise<CompressorFactory> {
 	if (explicitZopfli && 'zopfli' in options) {
 		try {
-			const zopfli = await importZopfli()
+			const zopfli = await zopfliImporter()
 			return () => zopfli.createGzip(options.zopfli)
 		} catch (error) {
 			const cause = error as NodeJS.ErrnoException
@@ -104,7 +106,7 @@ export async function createGzipCompressorFactory(
 
 	if (optionalZopfli) {
 		try {
-			const zopfli = await importZopfli()
+			const zopfli = await zopfliImporter()
 			return () => zopfli.createGzip(DEFAULT_ZOPFLI_OPTIONS)
 		} catch (error) {
 			const cause = error as NodeJS.ErrnoException
@@ -121,5 +123,5 @@ export async function createGzipCompressorFactory(
 		throw new Error(`[${INTEGRATION_NAME}] Error: zopfli options could not be resolved`)
 	}
 
-	return () => createGzip(options)
+	return () => zlibFactory(options)
 }
