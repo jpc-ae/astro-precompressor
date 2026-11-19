@@ -88,6 +88,9 @@ const configurations: Record<string, CompressionOptions> = {
 	cache: {
 		algorithms: gzipOnly,
 	},
+	preserveOutput: {
+		algorithms: gzipOnly,
+	},
 }
 
 if (!(scenario in configurations)) {
@@ -103,6 +106,7 @@ export function createAstroConfig(
 		output: 'static',
 		cacheDir: resolve(fixtureDirectory, '.cache'),
 		build: { format: buildFormat },
+		vite: scenario === 'preserveOutput' ? { build: { emptyOutDir: false } } : undefined,
 		integrations: [precompressor(options)],
 	})
 }

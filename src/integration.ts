@@ -95,17 +95,17 @@ export default function precompressor(userOptions: CompressionOptions = {}): Ast
 	const gzipPromise =
 		options.algorithms.gzip &&
 		createGzipCompressorFactory(options.algorithms.gzip, explicitZopfli, optionalZopfli)
-	//zstd
+	// zstd
 	const zstdPromise =
 		options.algorithms.zstd && createZstdCompressorFactory(options.algorithms.zstd)
 
 	// Attach rejection handlers immediately to prevent unhandled rejections.
 	// The original promises still reject when awaited below.
 	if (zstdPromise) {
-		void zstdPromise?.catch(() => {})
+		void zstdPromise.catch(() => {})
 	}
 	if (gzipPromise) {
-		void gzipPromise?.catch(() => {})
+		void gzipPromise.catch(() => {})
 	}
 
 	let cacheDirectory: string | undefined

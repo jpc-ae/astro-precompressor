@@ -1,19 +1,21 @@
+// Astro
 import type { AstroIntegrationLogger } from 'astro'
 export type Logger = AstroIntegrationLogger
 export type LogLevel = 0 | 1 | 2
 
+// Algorithms
 import type { SUPPORTED_ALGORITHMS } from './constants.js'
 import type { Transform } from 'node:stream'
 export type CompressionAlgorithm = (typeof SUPPORTED_ALGORITHMS)[number]
 
+// Zlib
 import type { BrotliOptions, ZlibOptions, ZstdOptions } from 'node:zlib'
 
+// Zopfli
 export type ZopfliModule = typeof import('node-zopfli-es')
 export type ZopfliOptions = import('node-zopfli-es').Options
 
-export type ZstdNapiModule = typeof import('zstd-napi')
-export type ZstdNapiOptions = import('zstd-napi').CompressParameters
-
+// CompressionOptions
 export interface AlgorithmOptions {
 	gzip?: boolean | ZlibOptions | { zopfli: boolean | ZopfliOptions }
 	brotli?: boolean | BrotliOptions
@@ -58,6 +60,7 @@ export interface ResolvedOptions {
 	recompressOnConfigChange: boolean
 }
 
+// Compression
 export type CompressorFactory = () => Transform | Promise<Transform>
 
 export interface Compressors {

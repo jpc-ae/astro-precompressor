@@ -124,11 +124,6 @@ export const SILLY_FILE_TYPES = [
 // Compression options
 // -----------------------------------------------------------------------------
 
-export const SUPPORTED_ENGINES = [
-	'zlib',
-	'zopfli',
-] as const
-
 export const SUPPORTED_ALGORITHMS = [
 	'gzip',
 	'brotli',

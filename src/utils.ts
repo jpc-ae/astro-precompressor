@@ -109,10 +109,6 @@ export function green(message: string) {
 	return styleText('green', message)
 }
 
-export function blue(message: string) {
-	return styleText('blue', message)
-}
-
 export function bold(message: string) {
 	return styleText('bold', message)
 }

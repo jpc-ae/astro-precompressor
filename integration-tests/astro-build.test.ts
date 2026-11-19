@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { brotliDecompressSync, gunzipSync, zstdDecompressSync } from 'node:zlib'
@@ -140,6 +140,27 @@ function testAstroFixture(fixtureDefinition: Fixture): void {
 		afterAll(async () => {
 			await cleanBuildArtifacts(fixture)
 			await writeFile(resolve(fixture.directory, 'public/included.txt'), originalIncludedText)
+		})
+
+		it('preserves existing output when Vite emptyOutDir is disabled', async () => {
+			const preservedFile = resolve(fixture.output, 'preserved-by-vite.txt')
+			const staleSidecar = resolve(fixture.output, 'index.html.br')
+			const preservedContents =
+				'This file must survive when Vite does not empty the output directory.'
+			const staleContents = Buffer.from('pre-existing sidecar')
+
+			await mkdir(fixture.output, { recursive: true })
+			await writeFile(preservedFile, preservedContents)
+			await writeFile(staleSidecar, staleContents)
+
+			await build('preserveOutput')
+
+			expect(await readFile(preservedFile, 'utf8')).toBe(preservedContents)
+			expect(await readFile(staleSidecar)).toEqual(staleContents)
+			// The selected scenario emits gzip only; the pre-existing Brotli sidecar is not ours to clean up.
+			const original = await readOutput(fixture, 'index.html')
+			const gzip = gunzipSync(await readOutput(fixture, 'index.html.gz'))
+			expect(gzip.equals(original)).toBe(true)
 		})
 
 		it('generates valid Gzip and Brotli files in a real Astro build', async () => {

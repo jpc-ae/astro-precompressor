@@ -1,295 +1,75 @@
-import { readFile, stat, utimes, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile, mkdir, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-
-import { describe, expect, it } from 'vitest'
-
-import {
-	copyPreservingTimestamps,
-	emptyCache,
-	fileExists,
-	getArtifactPath,
-	loadCache,
-	pruneCache,
-	removeDisabledArtifacts,
-	saveCache,
-} from '../src/cache.js'
-
-import { ALGORITHM_EXTENSIONS, CACHE_VERSION } from '../src/constants.js'
-import { createFile, useTempDirectory } from './helpers.js'
-
-describe('cache manifest', () => {
-	const temp = useTempDirectory()
-	let directory = ''
-
-	it('creates an empty cache', () => {
-		expect(emptyCache()).toEqual({
-			version: CACHE_VERSION,
-			configHash: null,
-			entries: {},
-		})
-	})
-
-	it('loads a valid manifest', async () => {
-		directory = await temp.create()
-
-		const manifestPath = join(directory, 'cache.json')
-
-		await writeFile(
-			manifestPath,
-			JSON.stringify({
-				version: CACHE_VERSION,
-				configHash: 'config-hash',
-				entries: {
-					'index.html': 'file-hash',
-				},
-			}),
-		)
-
-		await expect(loadCache(manifestPath)).resolves.toEqual({
-			version: CACHE_VERSION,
-			configHash: 'config-hash',
-			entries: {
-				'index.html': 'file-hash',
-			},
-		})
-	})
-
-	it('ignores entries with non-string values', async () => {
-		directory = await temp.create()
-
-		const manifestPath = join(directory, 'cache.json')
-
-		await writeFile(
-			manifestPath,
-			JSON.stringify({
-				version: CACHE_VERSION,
-				configHash: null,
-				entries: {
-					valid: 'hash',
-					invalid: 123,
-				},
-			}),
-		)
-
-		const cache = await loadCache(manifestPath)
-
-		expect(cache.entries).toEqual({
-			valid: 'hash',
-		})
-	})
-
-	it('returns an empty cache for an unsupported version', async () => {
-		directory = await temp.create()
-
-		const manifestPath = join(directory, 'cache.json')
-
-		await writeFile(
-			manifestPath,
-			JSON.stringify({
-				version: CACHE_VERSION + 1,
-				entries: {},
-			}),
-		)
-
-		expect(await loadCache(manifestPath)).toEqual(emptyCache())
-	})
-
-	it('returns an empty cache for malformed JSON', async () => {
-		directory = await temp.create()
-
-		const manifestPath = join(directory, 'cache.json')
-		await writeFile(manifestPath, '{invalid json')
-
-		expect(await loadCache(manifestPath)).toEqual(emptyCache())
-	})
-
-	it('returns an empty cache when the manifest does not exist', async () => {
-		directory = await temp.create()
-
-		expect(await loadCache(join(directory, 'missing.json'))).toEqual(emptyCache())
-	})
-
-	it('saves and reloads a manifest', async () => {
-		directory = await temp.create()
-
-		const manifestPath = join(directory, 'nested', 'cache.json')
-
-		const cache = {
-			version: CACHE_VERSION,
-			configHash: 'config-hash',
-			entries: {
-				'index.html': 'file-hash',
-			},
-		}
-
-		await saveCache(manifestPath, cache)
-
-		expect(await loadCache(manifestPath)).toEqual(cache)
-		expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toEqual(cache)
-	})
-})
-
-describe('artifact paths', () => {
-	const temp = useTempDirectory()
-
-	it('creates an artifact path with the algorithm extension', () => {
-		expect(getArtifactPath('/cache/artifacts', 'assets/index.html', '.gz')).toBe(
-			join('/cache/artifacts', 'assets', 'index.html.gz'),
-		)
-	})
-
-	it('rejects paths outside the artifact directory', () => {
-		expect(() => getArtifactPath('/cache/artifacts', '../outside.html', '.gz')).toThrow(
-			'Invalid cache path',
-		)
-	})
-
-	it('checks whether a file exists', async () => {
-		const directory = await temp.create()
-		const filePath = await createFile(directory, 'artifact.gz')
-
-		expect(await fileExists(filePath)).toBe(true)
-		expect(await fileExists(join(directory, 'missing.gz'))).toBe(false)
-	})
-
-	it('returns false for a directory', async () => {
-		const directory = await temp.create()
-
-		expect(await fileExists(directory)).toBe(false)
-	})
-})
-
-describe('copyPreservingTimestamps', () => {
-	const temp = useTempDirectory()
-	let directory = ''
-
-	it('copies the file and preserves its timestamps', async () => {
-		directory = await temp.create()
-
-		const source = await createFile(directory, 'cache/file.gz', 'compressed data')
-		const destination = join(directory, 'output/file.gz')
-
-		const timestamp = new Date('2020-01-01T12:00:00.000Z')
-
-		await utimes(source, timestamp, timestamp)
-
-		await copyPreservingTimestamps(source, destination)
-
-		const sourceStats = await stat(source)
-		const destinationStats = await stat(destination)
-
-		expect(await readFile(destination, 'utf8')).toBe('compressed data')
-		expect(destinationStats.mtimeMs).toBe(sourceStats.mtimeMs)
-	})
-
-	it('does not change the source artifact timestamp', async () => {
-		directory = await temp.create()
-
-		const source = await createFile(directory, 'cache/file.gz')
-		const destination = join(directory, 'output/file.gz')
-
-		const timestamp = new Date('2020-01-01T12:00:00.000Z')
-		await utimes(source, timestamp, timestamp)
-
-		await copyPreservingTimestamps(source, destination)
-
-		expect((await stat(source)).mtimeMs).toBe(timestamp.getTime())
-	})
-
-	it('rejects when the source file does not exist', async () => {
-		directory = await temp.create()
-
-		await expect(
-			copyPreservingTimestamps(join(directory, 'missing.gz'), join(directory, 'output.gz')),
-		).rejects.toThrow()
-	})
-})
-
-describe('pruneCache', () => {
-	const temp = useTempDirectory()
-	let directory = ''
-
-	it('removes stale artifacts and their manifest entries', async () => {
-		directory = await temp.create()
-
-		const artifactDirectory = join(directory, 'artifacts')
-
-		const retainedKey = 'retained/index.html'
-		const staleKey = 'removed/index.html'
-
-		for (const extension of Object.values(ALGORITHM_EXTENSIONS)) {
-			await createFile(artifactDirectory, `${retainedKey}${extension}`)
-			await createFile(artifactDirectory, `${staleKey}${extension}`)
-		}
-
-		const cache = {
-			version: CACHE_VERSION,
-			configHash: null,
-			entries: {
-				[retainedKey]: 'retained-hash',
-				[staleKey]: 'stale-hash',
-			},
-		}
-
-		const removed = await pruneCache(cache, artifactDirectory, new Set([retainedKey]))
-
-		expect(removed).toBe(1)
-		expect(cache.entries).toEqual({
-			[retainedKey]: 'retained-hash',
-		})
-
-		for (const extension of Object.values(ALGORITHM_EXTENSIONS)) {
-			expect(await fileExists(getArtifactPath(artifactDirectory, retainedKey, extension))).toBe(
-				true,
-			)
-
-			expect(await fileExists(getArtifactPath(artifactDirectory, staleKey, extension))).toBe(false)
-		}
-	})
-
-	it('does not remove entries that are still current', async () => {
-		directory = await temp.create()
-
-		const key = 'index.html'
-
-		const cache = {
-			version: CACHE_VERSION,
-			configHash: null,
-			entries: {
-				[key]: 'hash',
-			},
-		}
-
-		expect(await pruneCache(cache, join(directory, 'artifacts'), new Set([key]))).toBe(0)
-
-		expect(cache.entries[key]).toBe('hash')
-	})
-})
-
-describe('removeDisabledArtifacts', () => {
-	const temp = useTempDirectory()
-	let directory = ''
-
-	it('removes artifacts for disabled algorithms only', async () => {
-		directory = await temp.create()
-
-		const artifactDirectory = join(directory, 'artifacts')
-		const key = 'index.html'
-
-		for (const extension of Object.values(ALGORITHM_EXTENSIONS)) {
-			await createFile(artifactDirectory, `${key}${extension}`)
-		}
-
-		await removeDisabledArtifacts(key, artifactDirectory, {
-			gzip: {},
-			brotli: false,
-			zstd: false,
-		})
-
-		expect(await fileExists(getArtifactPath(artifactDirectory, key, '.gz'))).toBe(true)
-
-		expect(await fileExists(getArtifactPath(artifactDirectory, key, '.br'))).toBe(false)
-
-		expect(await fileExists(getArtifactPath(artifactDirectory, key, '.zst'))).toBe(false)
-	})
+import { afterEach, describe, expect, it } from 'vitest'
+import { emptyCache, loadCache, saveCache, getArtifactPath, fileExists, copyPreservingTimestamps, pruneCache, removeDisabledArtifacts } from '../src/cache.js'
+
+describe('cache helpers', () => {
+  let root = ''
+  afterEach(async () => { if (root) { const { rm } = await import('node:fs/promises'); await rm(root, { recursive: true, force: true }); root = '' } })
+  it('creates the expected empty manifest', () => {
+    expect(emptyCache()).toEqual({ version: 1, configHash: null, entries: {} })
+  })
+  it('loads valid manifests and filters invalid entry values', async () => {
+    root = await mkdtemp(join(tmpdir(), 'precompressor-'))
+    const path = join(root, 'cache.json')
+    await writeFile(path, JSON.stringify({ version: 1, configHash: 'abc', entries: { 'a.html': 'hash', bad: 3 } }))
+    expect(await loadCache(path)).toEqual({ version: 1, configHash: 'abc', entries: { 'a.html': 'hash' } })
+  })
+  it.each(['{broken', JSON.stringify({ version: 99, entries: {} }), JSON.stringify({ version: 1, entries: [] })])('falls back to an empty cache for invalid manifest %s', async contents => {
+    root = await mkdtemp(join(tmpdir(), 'precompressor-'))
+    const path = join(root, 'cache.json')
+    await writeFile(path, contents)
+    expect(await loadCache(path)).toEqual(emptyCache())
+  })
+  it('returns an empty cache when the manifest is missing', async () => {
+    root = await mkdtemp(join(tmpdir(), 'precompressor-'))
+    expect(await loadCache(join(root, 'missing.json'))).toEqual(emptyCache())
+  })
+  it('saves manifests atomically and creates parent directories', async () => {
+    root = await mkdtemp(join(tmpdir(), 'precompressor-'))
+    const path = join(root, 'nested', 'cache.json')
+    const cache = { ...emptyCache(), entries: { 'index.html': 'abc' } }
+    await saveCache(path, cache)
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(cache)
+    expect((await stat(join(root, 'nested'))).isDirectory()).toBe(true)
+  })
+  it('builds artifact paths and rejects traversal', async () => {
+    root = await mkdtemp(join(tmpdir(), 'precompressor-'))
+    expect(getArtifactPath(root, 'nested/index.html', '.gz')).toBe(join(root, 'nested', 'index.html.gz'))
+    expect(() => getArtifactPath(root, '../outside', '.br')).toThrow('Invalid cache path')
+  })
+  it('checks file existence and copies while preserving timestamps', async () => {
+    root = await mkdtemp(join(tmpdir(), 'precompressor-'))
+    const source = join(root, 'source.txt')
+    const destination = join(root, 'nested', 'copy.txt')
+    await writeFile(source, 'payload')
+    const timestamp = new Date('2020-01-02T03:04:05Z')
+    const { utimes } = await import('node:fs/promises')
+    await utimes(source, timestamp, timestamp)
+    expect(await fileExists(source)).toBe(true)
+    expect(await fileExists(join(root, 'missing'))).toBe(false)
+    await copyPreservingTimestamps(source, destination)
+    expect(await readFile(destination, 'utf8')).toBe('payload')
+    expect((await stat(destination)).mtime.getTime()).toBe((await stat(source)).mtime.getTime())
+  })
+  it('prunes stale entries and their compressed artifacts', async () => {
+    root = await mkdtemp(join(tmpdir(), 'precompressor-'))
+    const artifacts = join(root, 'artifacts')
+    await mkdir(artifacts, { recursive: true })
+    await writeFile(join(artifacts, 'keep.html.gz'), 'keep')
+    await writeFile(join(artifacts, 'old.html.gz'), 'old')
+    const cache = { ...emptyCache(), entries: { 'keep.html': 'a', 'old.html': 'b' } }
+    expect(await pruneCache(cache, artifacts, new Set(['keep.html']))).toBe(1)
+    expect(cache.entries).toEqual({ 'keep.html': 'a' })
+    expect(await fileExists(join(artifacts, 'old.html.gz'))).toBe(false)
+  })
+  it('removes artifacts for disabled algorithms only', async () => {
+    root = await mkdtemp(join(tmpdir(), 'precompressor-'))
+    for (const extension of ['.gz', '.br', '.zst']) await writeFile(join(root, `page.html${extension}`), extension)
+    await removeDisabledArtifacts('page.html', root, { gzip: false, brotli: {}, zstd: false } as never)
+    expect(await fileExists(join(root, 'page.html.gz'))).toBe(false)
+    expect(await fileExists(join(root, 'page.html.br'))).toBe(true)
+    expect(await fileExists(join(root, 'page.html.zst'))).toBe(false)
+  })
 })

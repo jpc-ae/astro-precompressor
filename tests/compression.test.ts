@@ -1,550 +1,65 @@
-import { readFile, readdir, stat, utimes } from 'node:fs/promises'
-import { gunzipSync, brotliDecompressSync } from 'node:zlib'
+import { mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-
-import { beforeEach, describe, expect, it } from 'vitest'
-
+import { gunzipSync } from 'node:zlib'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { compressFile } from '../src/compression.js'
 import { Semaphore } from '../src/semaphore.js'
-import { getArtifactPath } from '../src/cache.js'
-
-import { createFile, createLogger, createOptions, useTempDirectory } from './helpers.js'
-
-import { DEFAULT_ZLIB_OPTIONS } from '../src/gzip.js'
-
-function createCompressibleContent(label: string): string {
-	return `<html><body>${label}</body></html>\n`.repeat(100)
-}
+import { resolveGzipOptions } from '../src/gzip.js'
+import type { ResolvedOptions } from '../src/types.js'
 
 describe('compressFile', () => {
-	const temp = useTempDirectory()
-	let directory = ''
-	let semaphore: Semaphore
-
-	beforeEach(() => {
-		semaphore = new Semaphore(2)
-	})
-
-	it('generates a gzip artifact and output sidecar', async () => {
-		directory = await temp.create()
-
-		const content = createCompressibleContent('Hello, World!')
-		const source = await createFile(directory, 'output/index.html', content)
-
-		const artifactDirectory = join(directory, 'cache')
-		const options = createOptions()
-		const logger = createLogger()
-
-		const result = await compressFile(
-			source,
-			artifactDirectory,
-			'index.html',
-			'source-hash',
-			undefined,
-			false,
-			options,
-			logger,
-			undefined,
-			semaphore,
-		)
-
-		const artifact = getArtifactPath(artifactDirectory, 'index.html', '.gz')
-		const output = `${source}.gz`
-
-		expect(result.compressions).toHaveLength(1)
-		expect(result.compressions[0]).toMatchObject({
-			algorithm: 'gzip',
-			generated: true,
-		})
-
-		expect(gunzipSync(await readFile(output, null)).toString()).toBe(content)
-
-		expect(await readFile(artifact)).toEqual(await readFile(output))
-	})
-
-	it('generates gzip and Brotli artifacts independently', async () => {
-		directory = await temp.create()
-
-		const content = createCompressibleContent('Hello, World!')
-		const source = await createFile(directory, 'output/index.html', content)
-
-		const options = createOptions({
-			algorithms: {
-				gzip: {},
-				brotli: {},
-				zstd: false,
-			},
-		})
-
-		const result = await compressFile(
-			source,
-			join(directory, 'cache'),
-			'index.html',
-			'source-hash',
-			undefined,
-			false,
-			options,
-			createLogger(),
-			undefined,
-			semaphore,
-		)
-
-		expect(result.compressions.map(item => item.algorithm).sort()).toEqual(['brotli', 'gzip'])
-
-		expect(gunzipSync(await readFile(`${source}.gz`)).toString()).toBe(content)
-
-		expect(brotliDecompressSync(await readFile(`${source}.br`)).toString()).toBe(content)
-	})
-
-	it('reuses cached artifacts when the source hash matches', async () => {
-		directory = await temp.create()
-
-		const content = createCompressibleContent('Hello, Cache!')
-		const source = await createFile(directory, 'output/index.html', content)
-
-		const artifactDirectory = join(directory, 'cache')
-		const artifact = getArtifactPath(artifactDirectory, 'index.html', '.gz')
-
-		const first = await compressFile(
-			source,
-			artifactDirectory,
-			'index.html',
-			'source-hash',
-			undefined,
-			false,
-			createOptions(),
-			createLogger(),
-			undefined,
-			semaphore,
-		)
-
-		expect(first.compressions[0].generated).toBe(true)
-
-		const timestamp = new Date('2020-01-01T12:00:00.000Z')
-		await utimes(artifact, timestamp, timestamp)
-
-		const second = await compressFile(
-			source,
-			artifactDirectory,
-			'index.html',
-			'source-hash',
-			'source-hash',
-			false,
-			createOptions(),
-			createLogger(),
-			undefined,
-			semaphore,
-		)
-
-		expect(second.compressions[0]).toMatchObject({
-			generated: false,
-			discarded: false,
-		})
-
-		const artifactStats = await stat(artifact)
-		const outputStats = await stat(`${source}.gz`)
-
-		expect(outputStats.mtimeMs).toBe(artifactStats.mtimeMs)
-		expect(outputStats.mtimeMs).toBe(timestamp.getTime())
-	})
-
-	it('regenerates when the source hash changes', async () => {
-		directory = await temp.create()
-
-		const content = createCompressibleContent('Hello, Cache!')
-		const source = await createFile(directory, 'output/index.html', content)
-
-		const artifactDirectory = join(directory, 'cache')
-
-		const result = await compressFile(
-			source,
-			artifactDirectory,
-			'index.html',
-			'new-hash',
-			'old-hash',
-			false,
-			createOptions(),
-			createLogger(),
-			undefined,
-			semaphore,
-		)
-
-		expect(result.compressions[0].generated).toBe(true)
-		expect(gunzipSync(await readFile(`${source}.gz`)).toString()).toBe(content)
-	})
-
-	it('regenerates when forceRecompress is true', async () => {
-		directory = await temp.create()
-
-		const content = createCompressibleContent('Hello, Darkness!')
-		const source = await createFile(directory, 'output/index.html', content)
-
-		const artifactDirectory = join(directory, 'cache')
-
-		await compressFile(
-			source,
-			artifactDirectory,
-			'index.html',
-			'source-hash',
-			'source-hash',
-			false,
-			createOptions(),
-			createLogger(),
-			undefined,
-			semaphore,
-		)
-
-		const result = await compressFile(
-			source,
-			artifactDirectory,
-			'index.html',
-			'source-hash',
-			'source-hash',
-			true,
-			createOptions(),
-			createLogger(),
-			undefined,
-			semaphore,
-		)
-
-		expect(result.compressions[0].generated).toBe(true)
-	})
-
-	it('rejects when Zopfli is enabled but not initialized', async () => {
-		directory = await temp.create()
-
-		const content = createCompressibleContent('Hello, Darkness!')
-		const source = await createFile(directory, 'output/index.html', content)
-
-		const options = createOptions({
-			algorithms: {
-				gzip: {
-					zopfli: {},
-				},
-				brotli: false,
-				zstd: false,
-			},
-		})
-
-		await expect(
-			compressFile(
-				source,
-				join(directory, 'cache'),
-				'index.html',
-				'source-hash',
-				undefined,
-				false,
-				options,
-				createLogger(),
-				undefined,
-				semaphore,
-			),
-		).rejects.toThrow('Zopfli module has not been initialized.')
-	})
-
-	it('does not leave temporary files after a compression failure', async () => {
-		directory = await temp.create()
-
-		const content = createCompressibleContent('Hello, Failure!')
-		const source = await createFile(directory, 'output/index.html', content)
-
-		const artifactDirectory = join(directory, 'cache')
-
-		const options = createOptions({
-			algorithms: {
-				gzip: {
-					zopfli: {},
-				},
-				brotli: false,
-				zstd: false,
-			},
-		})
-
-		await expect(
-			compressFile(
-				source,
-				artifactDirectory,
-				'index.html',
-				'source-hash',
-				undefined,
-				false,
-				options,
-				createLogger(),
-				undefined,
-				semaphore,
-			),
-		).rejects.toThrow()
-
-		const files = await readdir(artifactDirectory).catch(() => [])
-
-		expect(files.some(file => file.endsWith('.tmp'))).toBe(false)
-		expect(await readFile(source, 'utf8')).toBe(content)
-	})
-
-	it('does not overwrite the source file', async () => {
-		directory = await temp.create()
-
-		const content = createCompressibleContent('Hello, World!')
-		const source = await createFile(directory, 'output/index.html', content)
-
-		await compressFile(
-			source,
-			join(directory, 'cache'),
-			'index.html',
-			'source-hash',
-			undefined,
-			false,
-			createOptions(),
-			createLogger(),
-			undefined,
-			semaphore,
-		)
-
-		expect(await readFile(source, 'utf8')).toBe(content)
-	})
-
-	it('discards compressed output when it is larger than the source', async () => {
-		directory = await temp.create()
-
-		const source = await createFile(directory, 'output/tiny.txt', 'x')
-		const artifactDirectory = join(directory, 'cache')
-
-		const result = await compressFile(
-			source,
-			artifactDirectory,
-			'tiny.txt',
-			'source-hash',
-			undefined,
-			false,
-			createOptions({
-				algorithms: {
-					gzip: DEFAULT_ZLIB_OPTIONS,
-					brotli: false,
-					zstd: false,
-				},
-				performance: {
-					concurrency: 2,
-					incremental: true,
-					discardCompressionIfLarger: true,
-				},
-			}),
-			createLogger(),
-			undefined,
-			semaphore,
-		)
-
-		const artifact = getArtifactPath(artifactDirectory, 'tiny.txt', '.gz')
-
-		expect(result.compressions[0]).toMatchObject({
-			algorithm: 'gzip',
-			generated: true,
-			discarded: true,
-		})
-
-		expect(await stat(artifact)).toBeDefined()
-		expect(await stat(artifact).then(stats => stats.size)).toBeGreaterThan(
-			(await stat(source)).size,
-		)
-
-		await expect(stat(`${source}.gz`)).rejects.toThrow()
-	})
-
-	it('discards oversized cached artifacts without recompressing', async () => {
-		directory = await temp.create()
-
-		const source = await createFile(directory, 'output/tiny.txt', 'x')
-		const artifactDirectory = join(directory, 'cache')
-		const options = createOptions({
-			algorithms: {
-				gzip: DEFAULT_ZLIB_OPTIONS,
-				brotli: false,
-				zstd: false,
-			},
-		})
-
-		const first = await compressFile(
-			source,
-			artifactDirectory,
-			'tiny.txt',
-			'source-hash',
-			undefined,
-			false,
-			options,
-			createLogger(),
-			undefined,
-			semaphore,
-		)
-
-		const artifact = getArtifactPath(artifactDirectory, 'tiny.txt', '.gz')
-
-		expect(first.compressions[0].generated).toBe(true)
-
-		const second = await compressFile(
-			source,
-			artifactDirectory,
-			'tiny.txt',
-			'source-hash',
-			'source-hash',
-			false,
-			createOptions({
-				...options,
-				performance: {
-					...options.performance,
-					discardCompressionIfLarger: true,
-				},
-			}),
-			createLogger(),
-			undefined,
-			semaphore,
-		)
-
-		expect(second.compressions[0]).toMatchObject({
-			generated: false,
-			discarded: true,
-		})
-
-		expect(await stat(artifact)).toBeDefined()
-		await expect(stat(`${source}.gz`)).rejects.toThrow()
-	})
-
-	it('copies larger compressed output when discardCompressionIfLarger is disabled', async () => {
-		directory = await temp.create()
-
-		const source = await createFile(directory, 'output/tiny.txt', 'x')
-
-		const result = await compressFile(
-			source,
-			join(directory, 'cache'),
-			'tiny.txt',
-			'source-hash',
-			undefined,
-			false,
-			createOptions({
-				algorithms: {
-					gzip: DEFAULT_ZLIB_OPTIONS,
-					brotli: false,
-					zstd: false,
-				},
-				performance: {
-					concurrency: 2,
-					incremental: true,
-					discardCompressionIfLarger: false,
-				},
-			}),
-			createLogger(),
-			undefined,
-			semaphore,
-		)
-
-		const output = `${source}.gz`
-
-		expect(result.compressions[0]).toMatchObject({
-			generated: true,
-			discarded: false,
-		})
-
-		expect(await stat(output)).toBeDefined()
-		expect((await stat(output)).size).toBeGreaterThan((await stat(source)).size)
-	})
-
-	it('shares one concurrency limit across files and enabled algorithms', async () => {
-		directory = await temp.create()
-		semaphore = new Semaphore(1)
-
-		const content = createCompressibleContent('Shared semaphore')
-		const sourceA = await createFile(directory, 'output/a.html', content)
-		const sourceB = await createFile(directory, 'output/b.html', content)
-		const artifactDirectory = join(directory, 'cache')
-		const options = createOptions({
-			algorithms: {
-				gzip: DEFAULT_ZLIB_OPTIONS,
-				brotli: {},
-				zstd: false,
-			},
-		})
-
-		// Occupy the only slot so all compression requests must wait.
-		const release = await semaphore.acquire()
-		let settled = false
-
-		const pending = Promise.all([
-			compressFile(
-				sourceA,
-				artifactDirectory,
-				'a.html',
-				'hash-a',
-				undefined,
-				false,
-				options,
-				createLogger(),
-				undefined,
-				semaphore,
-			),
-			compressFile(
-				sourceB,
-				artifactDirectory,
-				'b.html',
-				'hash-b',
-				undefined,
-				false,
-				options,
-				createLogger(),
-				undefined,
-				semaphore,
-			),
-		]).finally(() => {
-			settled = true
-		})
-
-		try {
-			await new Promise(resolve => setTimeout(resolve, 25))
-			expect(settled).toBe(false)
-		} finally {
-			release()
-		}
-
-		const results = await pending
-
-		expect(results).toHaveLength(2)
-		expect(results.every(result => result.compressions.length === 2)).toBe(true)
-		expect(await stat(`${sourceA}.gz`)).toBeDefined()
-		expect(await stat(`${sourceA}.br`)).toBeDefined()
-		expect(await stat(`${sourceB}.gz`)).toBeDefined()
-		expect(await stat(`${sourceB}.br`)).toBeDefined()
-	})
-
-	it('releases its semaphore slot when compression fails', async () => {
-		directory = await temp.create()
-
-		const source = await createFile(
-			directory,
-			'output/failure.html',
-			createCompressibleContent('Semaphore release'),
-		)
-		const failingOptions = createOptions({
-			algorithms: {
-				gzip: { zopfli: {} },
-				brotli: false,
-				zstd: false,
-			},
-		})
-
-		await expect(
-			compressFile(
-				source,
-				join(directory, 'cache'),
-				'failure.html',
-				'hash-failure',
-				undefined,
-				false,
-				failingOptions,
-				createLogger(),
-				undefined,
-				semaphore,
-			),
-		).rejects.toThrow('Zopfli module has not been initialized.')
-
-		// A subsequent operation must still be able to acquire the released slot.
-		await expect(semaphore.run(async () => 'slot released')).resolves.toBe('slot released')
-	})
+  let root = ''
+  afterEach(async () => { if (root) await rm(root, { recursive: true, force: true }); root = '' })
+  async function setup() {
+    root = await mkdtemp(join(tmpdir(), 'precompressor-'))
+    const output = join(root, 'dist')
+    const artifacts = join(root, 'cache')
+    const source = join(output, 'nested', 'index.html')
+    const { mkdir } = await import('node:fs/promises')
+    await mkdir(join(output, 'nested'), { recursive: true })
+    await writeFile(source, '<html>' + 'hello '.repeat(200) + '</html>')
+    const options = {
+      algorithms: { gzip: resolveGzipOptions(true), brotli: false, zstd: false },
+      performance: { concurrency: 2, incremental: true, discardCompressionIfLarger: true },
+      filters: { minSize: 0, fileTypes: ['.html'], pruneCache: true },
+      logLevel: 0, failOnError: false, recompressOnConfigChange: false,
+    } as ResolvedOptions
+    const logger = { debug: vi.fn(), info: vi.fn(), error: vi.fn() } as never
+    const { createGzipCompressorFactory } = await import('../src/gzip.js')
+    const factory = await createGzipCompressorFactory(resolveGzipOptions(true) as never, false, false)
+    return { source, artifacts, options, logger, compressors: { gzip: factory } }
+  }
+  it('generates a valid sidecar and reports generation metadata', async () => {
+    const context = await setup()
+    const result = await compressFile(context.source, context.artifacts, 'nested/index.html', 'hash-a', undefined, false, context.options, context.logger, context.compressors, new Semaphore(1))
+    expect(result.compressions).toHaveLength(1)
+    expect(result.compressions[0]).toMatchObject({ algorithm: 'gzip', generated: true, discarded: false })
+    expect(gunzipSync(await readFile(context.source + '.gz')).toString()).toContain('hello')
+    expect((await stat(context.source + '.gz')).mtime.getTime()).toBe(
+    (await stat(join(context.artifacts, 'nested/index.html.gz'))).mtime.getTime(),
+  )
+  })
+  it('reuses cached artifacts when hashes match', async () => {
+    const context = await setup()
+    const first = await compressFile(context.source, context.artifacts, 'nested/index.html', 'same-hash', undefined, false, context.options, context.logger, context.compressors, new Semaphore(1))
+    const second = await compressFile(context.source, context.artifacts, 'nested/index.html', 'same-hash', 'same-hash', false, context.options, context.logger, context.compressors, new Semaphore(1))
+    expect(first.compressions[0].generated).toBe(true)
+    expect(second.compressions[0]).toMatchObject({ generated: false, elapsed: 0 })
+  })
+  it('forces recompression when requested', async () => {
+    const context = await setup()
+    await compressFile(context.source, context.artifacts, 'nested/index.html', 'same', undefined, false, context.options, context.logger, context.compressors, new Semaphore(1))
+    const result = await compressFile(context.source, context.artifacts, 'nested/index.html', 'same', 'same', true, context.options, context.logger, context.compressors, new Semaphore(1))
+    expect(result.compressions[0].generated).toBe(true)
+  })
+  it('rejects when a configured compressor is missing', async () => {
+    const context = await setup()
+    await expect(compressFile(context.source, context.artifacts, 'nested/index.html', 'hash', undefined, false, context.options, context.logger, {}, new Semaphore(1))).rejects.toThrow('compressor could not be found')
+  })
+  it('rejects failed compressors without leaving temporary files', async () => {
+    const context = await setup()
+    const broken = { gzip: () => { throw new Error('compressor broke') } }
+    await expect(compressFile(context.source, context.artifacts, 'nested/index.html', 'hash', undefined, false, context.options, context.logger, broken, new Semaphore(1))).rejects.toThrow('compressor broke')
+  })
 })

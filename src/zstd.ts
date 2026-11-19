@@ -2,12 +2,9 @@ import * as zlib from 'node:zlib'
 
 import { INTEGRATION_NAME } from './constants.js'
 
-import type {
-	AlgorithmOptions,
-	CompressorFactory,
-	ResolvedAlgorithmOptions,
-	ZstdNapiOptions,
-} from './types.js'
+import type { AlgorithmOptions, CompressorFactory, ResolvedAlgorithmOptions } from './types.js'
+
+type ZstdNapiOptions = import('zstd-napi').CompressParameters
 
 const ZSTD_C_COMPRESSION_LEVEL = 100
 

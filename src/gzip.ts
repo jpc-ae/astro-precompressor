@@ -94,7 +94,7 @@ export async function createGzipCompressorFactory(
 			const command = packageManager ? installScripts.get(packageManager) : undefined
 
 			throw new Error(
-				`The "node-zopfli-es" package is required when Zopfli is explicitely enabled.${
+				`The "node-zopfli-es" package is required when Zopfli is explicitly enabled.${
 					command ? ` Install it with: ${bold(command)}` : ''
 				}`,
 				{ cause: error },
