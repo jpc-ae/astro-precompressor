@@ -13,7 +13,7 @@ performance.
 > [!IMPORTANT] For this integration to be useful, your hosting environment must
 > be set up for serving precompressed sidecars. See
 > [Configuring Your Hosting Environment](#configuring-your-hosting-environment)
-> for details.
+> for suggestions on how to do this.
 
 ## Quick Start
 
@@ -30,10 +30,9 @@ pnpm astro add astro-precompressor
 yarn astro add astro-precompressor
 ```
 
-This will install the module into your project, import the integration in your
-Astro config, and add it to the end of your integrations array. The next time
-you run your build, you should see the compression details at the end of your
-build output.
+This will install the package, add the integration to your Astro configuration,
+and place it at the end of your `integrations` array. The next time you run your
+build, you should see compression statistics in your build output.
 
 ```bash
  generating precompressed files 
@@ -62,16 +61,15 @@ offer caching or are too complicated to configure for common options like file
 filtering. They are also either restricted to node's zlib library or require
 command-line scripts.
 
-This package aims to provide a straightforward configuration without sacrificing
-performance or flexibility. The priority is faster builds and, more importantly,
-faster rebuilds. It also offers optional Zopfli for better gzip compression, and
-is open to adding other engines on request (please
+This package aims to be straightforward without sacrificing performance or
+flexibility. It offers optional Zopfli for better gzip compression, and is open
+to adding other engines on request (please
 [open an issue](https://github.com/jpc-ae/astro-precompressor/issues) for any
-requests).
+requests). Faster rebuilds using an incremental cache is the priority.
 
 ## Features
 
-- **Sane defaults:** Gzip and Brotli tuned for high compression, with
+- **Sane defaults:** Gzip and Brotli tuned for high compression ratios, with
   incremental caching to avoid redundant processing; Zstandard off but available
   if needed.
 - **Highly configurable:** Fine-tune algorithm-specific compression settings,
@@ -86,8 +84,10 @@ requests).
   than their originals.
 - **Detailed logging:** Choose between a basic summary, per-file statistics
   similar to Astro's build logs, and detailed diagnostic output.
+- **Legacy Node.js support:** Install the `zstd-napi` package into your project
+  for zstd compression on Node.js versions prior to v22.15.0.
 
-## Installation
+## Manual Installation
 
 ```bash
 # npm
@@ -122,13 +122,13 @@ pnpm add -D node-zopfli-es
 yarn add -D node-zopfli-es
 ```
 
-> [!TIP] The default settings used by `astro-precompressor` have been tuned for
-> speed without sacrificing compression. Unless gzip output is not needed or
-> there is a compelling reason to avoid the extra dependency, installing
-> `node-zopfli-es` alongside `astro-precompressor` is highly recommended. See
-> the Gzip section under [Algorithms](#compression-algorithms) for more details.
+> [!TIP] The default zopfli settings used by `astro-precompressor` have been
+> tuned for speed without sacrificing compression. If smaller gzip files are a
+> priority, installing `node-zopfli-es` alongside `astro-precompressor` is
+> highly recommended. See the Gzip section under
+> [Algorithms](#compression-algorithms) for more details.
 
-## Usage
+### Usage
 
 Import the integration into your Astro configuration and add it as the last item
 of the integrations array.
@@ -155,14 +155,14 @@ export default defineConfig({
 
 The integration accepts an optional configuration object.
 
-| Option                     | Default                 | Description                                               |
-| -------------------------- | ----------------------- | --------------------------------------------------------- |
-| `algorithms`               | Gzip and Brotli enabled | Compression algorithms and settings                       |
-| `filters`                  | Built-in file types     | Files eligible for compression                            |
-| `performance`              | Automatic concurrency   | Processing and caching behaviour                          |
-| `logLevel`                 | 2                       | Logging verbosity                                         |
-| `failOnError`              | disabled                | Whether compression failures stop the build               |
-| `recompressOnConfigChange` | disabled                | Whether changes to this configuration force recompression |
+| Option                     | Default                                                 | Description                                         |
+| -------------------------- | ------------------------------------------------------- | --------------------------------------------------- |
+| `algorithms`               | Gzip, Brotli enabled; Zstandard disabled                | Compression algorithms and their settings           |
+| `filters`                  | Built-in filetypes; 150-byte minimum                    | Files eligible for compression                      |
+| `performance`              | System-derived concurrency; incremental caching enabled | Processing, caching, and output behaviour           |
+| `logLevel`                 | 2 (diagnostics available)                               | Logging verbosity                                   |
+| `failOnError`              | false                                                   | Whether compression errors fail the build           |
+| `recompressOnConfigChange` | false                                                   | Whether configuration changes trigger recompression |
 
 Any provided options will be merged with the defaults. For example, `gzip` will
 still be enabled with the configuration below.
@@ -212,8 +212,8 @@ Gzip supports two compression engines:
   generally produces smaller gzip files. It depends on the `node-zopfli-es`
   package.
 
-Without `node-zopfli-es` installed, the following zlib options are used. They
-ensure maximum compression with this engine.
+When Zopfli is unavailable or disabled, the following zlib options are used to
+request the highest compression level supported by the zlib engine.
 
 ```ts
 gzip: {
@@ -237,18 +237,18 @@ gzip: {
 ```
 
 > [!TIP] While higher `numiterations` can produce smaller file sizes, it does so
-> at the expense of speed. 15 (the normal default) is common, but did not
-> meaningfully affect the final compression ratios in testing while taking 3
-> times longer. The tests revealed that, for representative minified Astro
-> output files, `numiterations: 5` produced files that were identical in size to
-> `numiterations: 15`, always smaller than `zlib` while only being slightly
-> slower than `zlib`. `blocksplitting` has also been turned off for a similar
-> reason. Feel free to experiment if maximum gzip compression is a priority for
-> you rather than relying on `brotli`.
+> at the expense of speed. In testing representative minified Astro output
+> files, setting it to `5` produced files that were identical in size to `15`
+> (the engine default) while being three times faster. `blocksplitting` has also
+> been turned off for a similar reason. These settings aim to provide producing
+> meaningful savings over standard gzip while avoiding the extreme processing
+> time associated with higher Zopfli iteration counts. Feel free to experiment
+> if maximum gzip compression is a priority for you rather than relying on
+> `brotli`.
 
-Even with the package installed, Zopfli can be explicitly disabled by providing
-custom `zlib` compression options or setting `algorithms.gzip.zopfli` to
-`false`.
+Even with the `node-zopfli-es` package installed, Zopfli can be explicitly
+disabled by providing custom `zlib` compression options or setting
+`algorithms.gzip.zopfli` to `false`.
 
 ```ts
 gzip: {
@@ -279,13 +279,13 @@ brotli: {
 #### Zstandard
 
 Since Brotli generally achieves better compression ratios than Zstandard for web
-assets (at the expense of speed) and has been available in browsers for longer,
-it is the preferred option for precompression. Zstandard is instead an
-attractive middleware option on server rendered pages where compression speed
-and resource usage often matter more.
+assets and has been available in browsers for longer, it is the preferred option
+for precompression. Zstandard is instead an attractive middleware option on
+server rendered pages where compression speed and resource usage often matter
+more.
 
-This integration is exclusively for precompressing static assets. Zstandard is
-therefore disabled by default. It can, however, be enabled by setting its
+Since this integration is exclusively for precompressing static assets,
+Zstandard is disabled by default. It can, however, be enabled by setting its
 property to true or providing a configuration object. The default settings for
 `zstd` are below, prioritizing high compression ratios without overly taxing
 your system.
@@ -299,11 +299,16 @@ zstd: {
 ```
 
 > [!CAUTION] 19 is the highest standard compression level. Setting this higher
-> (20-22) turns on ultra mode which is significantly more compute-intensive. If
+> (20–22) turns on ultra mode which is significantly more compute-intensive. If
 > you experiment with these higher levels, consider reducing the
 > `performance.concurrency` option to a conservative value, such as 1, and
-> monitor memory usage. A machine with sufficient CPU and memory resources, such
-> as a server environment, is recommended.
+> monitor memory usage. A machine or build environment with sufficient CPU and
+> memory resources, such as a cloud build server, is recommended.
+
+Native Zstandard compression was added in `node` v22.15.0. In projects still
+using Astro 5 with an older `node` version, Zstandard output can still be
+created by installing the `zstd-napi` package which `astro-precompressor` will
+then automatically use as a fallback.
 
 ### File Filtering
 
@@ -311,7 +316,7 @@ The `filters` option controls which build output files should be compressed. Its
 default options are shown below.
 
 ```ts
-WEB_FILE_TYPES = [
+export const WEB_FILE_TYPES = [
 	'.html',
 	'.htm',
 	'.css',
@@ -320,19 +325,20 @@ WEB_FILE_TYPES = [
 	'.cjs',
 ]
 
-DATA_FILE_TYPES = [
+export const DATA_FILE_TYPES = [
 	'.json',
 	'.xml',
 	'.rss',
 	'.atom',
 ]
 
-FONT_FILE_TYPES = [
+export const FONT_FILE_TYPES = [
 	'.ttf',
 	'.otf',
 	'.eot',
 ]
 
+// ...
 filters: {
   minSize: 150,
   fileTypes: [
@@ -346,6 +352,7 @@ filters: {
   exclude: undefined,
   pruneCache: true,
 }
+// ...
 ```
 
 | Option       | Description                                               |
@@ -422,8 +429,9 @@ performance: {
 | `discardCompressionIfLarger` | Whether to discard compressed output when the original is smaller.                           |
 
 The default value for `concurrency` is set automatically based on the number of
-logical processors that Node.js reports as available. This is usually optimal,
-but lower values may use less memory at the expense of speed.
+logical processors that Node.js reports as available. This provides a sensible
+default, but lower values may use less memory at the expense of speed. Feel free
+to experiment if you feel the build is stuttering during compression.
 
 When `incremental` is enabled, compression artifacts are retained in the cache
 along with a hash of the source file. While this may marginally slow down
@@ -442,8 +450,8 @@ copied into the build output.
 The integration maintains a cache inside Astro's configured cache directory.
 
 Cached compression artifacts are associated with their source files using
-content hashes. When a source file hasn't changed, its cached artifacts can be
-reused instead of running the compression engine again.
+content hashes, so changes to file contents trigger recompression while
+unchanged files can reuse cached results.
 
 The cache is maintained independently of the build output, allowing compressed
 sidecars to be restored along with their modification timestamps.
@@ -489,20 +497,21 @@ The original files are never modified or replaced.
 Three levels of logging detail are available:
 
 1. **Summary (`logLevel: 0`):** A concise build summary along with any errors.
-2. **Detailed (`logLevel: 1`):** Per-file processing information, cache status,
+2. **Breakdown (`logLevel: 1`):** Per-file processing information, cache status,
    compression statistics, and a more detailed summary.
-3. **Debug (`logLevel: 2`):** Additional diagnostic messages explaining the
-   individual processing steps.
-
-Even when `logLevel` is set to `2`, debug messages will only be shown when the
-`--verbose` flag is added to the `astro build` command. The default level is `2`
-to match Astro's own logging conventions.
-
-> [!TIP] Set this value to 0 if you prefer concise logs.
+3. **Diagnostics (`logLevel: 2`):** Additional diagnostic messages explaining
+   the individual processing steps.
 
 ```ts
-logLevel: 0
+logLevel: 2
 ```
+
+When `logLevel` is set to `2`, debug messages will only be shown when the
+`--verbose` flag is added to the `astro build` command; otherwise it produces
+the same output as `logLevel: 1`. The default level is `2` to match Astro's own
+logging conventions.
+
+> [!TIP] Set this value to 0 if you prefer concise logs.
 
 ## Build Lifecycle
 
@@ -575,14 +584,15 @@ RewriteRule \.eot\.(br|gz)$ - [T=application/vnd.ms-fontobject,E=no-brotli:1,E=n
 </FilesMatch>
 ```
 
-> [!TIP] Adjust the file types above to match your `astro-precompressor`
+> [!TIP] Adjust the filetypes above to match your `astro-precompressor`
 > configuration.
 
 > [!WARNING] The `.htaccess` configuration above is representative and does not
 > guard against a missing `mod_rewrite`. It assumes `mod_headers` and `mod_mime`
 > are available. The encoding conditions reject explicitly disabled encodings
 > (q=0), but do not implement complete quality-value negotiation or wildcard
-> handling. Always test before using it in a production environment.
+> handling. Always test with your actual Apache setup and file types before
+> using it in a production environment.
 
 ### Nginx
 
