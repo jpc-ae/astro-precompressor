@@ -4,9 +4,10 @@ import { brotliDecompressSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
 import { runBuild } from '../src/build.js'
 import { createBrotliCompressorFactory } from '../src/brotli.js'
-import { createResolvedOptions } from './helpers/options.js'
+import { createResolvedOptions, fastGzip } from './helpers/options.js'
 import { createMockLogger } from './helpers/logger.js'
 import { createTempDir } from './helpers/filesystem.js'
+import { createFailingStreamCompressorFactory } from './helpers/compressors.js'
 
 describe('runBuild', () => {
 	let cleanup: (() => Promise<void>) | undefined
@@ -118,5 +119,99 @@ describe('runBuild', () => {
 				{},
 			),
 		).rejects.toThrow('no eligible algorithms')
+	})
+
+	it('records a file compression failure but continues processing other files when failOnError is false', async () => {
+		const { output, cache } = await setup()
+
+		const failedFile = join(output, 'failed.html')
+		const successfulFile = join(output, 'successful.html')
+
+		await writeFile(failedFile, 'FAIL_STREAM')
+		await writeFile(successfulFile, 'this file should still be processed')
+
+		const logger = createMockLogger()
+
+		await runBuild(
+			output,
+			cache,
+			'config-a',
+			createResolvedOptions({
+				algorithms: {
+					gzip: fastGzip,
+					brotli: false,
+					zstd: false,
+				},
+				failOnError: false,
+				performance: {
+					discardCompressionIfLarger: false,
+				},
+			}),
+			logger,
+			{
+				gzip: createFailingStreamCompressorFactory(),
+			},
+		)
+
+		// The failed file should not have an output sidecar.
+		await expect(readFile(`${failedFile}.gz`)).rejects.toMatchObject({
+			code: 'ENOENT',
+		})
+
+		// The worker pool should still process the other file.
+		expect(await readFile(`${successfulFile}.gz`, 'utf8')).toBe(
+			'this file should still be processed',
+		)
+
+		// The failure should be reported through the logger.
+		expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('stream compression failed'))
+	})
+
+	it('throws the build summary after recording a stream compression failure when failOnError is true', async () => {
+		const { output, cache } = await setup()
+
+		const source = join(output, 'failed.html')
+		await writeFile(source, 'FAIL_STREAM')
+
+		const logger = createMockLogger()
+
+		await expect(
+			runBuild(
+				output,
+				cache,
+				'config-a',
+				createResolvedOptions({
+					algorithms: {
+						gzip: fastGzip,
+						brotli: false,
+						zstd: false,
+					},
+					failOnError: true,
+				}),
+				logger,
+				{
+					gzip: createFailingStreamCompressorFactory(),
+				},
+			),
+		).rejects.toThrow('Compression failed for 1 operation')
+
+		expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('stream compression failed'))
+		await expect(readFile(`${source}.gz`)).rejects.toMatchObject({ code: 'ENOENT' })
+	})
+
+	it('completes successfully when no eligible files are found', async () => {
+		const { output, cache } = await setup()
+
+		const logger = createMockLogger()
+
+		await expect(
+			runBuild(output, cache, 'config-a', createResolvedOptions(), logger, {
+				brotli: createBrotliCompressorFactory(),
+			}),
+		).resolves.toBeUndefined()
+
+		expect(logger.error).not.toHaveBeenCalled()
+		expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Processed 0 source files'))
+		expect(logger.info).toHaveBeenCalledWith('Done!')
 	})
 })

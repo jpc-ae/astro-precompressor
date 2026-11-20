@@ -10,6 +10,8 @@ import {
 	copyPreservingTimestamps,
 	pruneCache,
 	removeDisabledArtifacts,
+	hasCacheHit,
+	removeDisabledOutputSidecars,
 } from '../src/cache.js'
 import type { ResolvedAlgorithmOptions } from '../src/types.js'
 import { createTempDir } from './helpers/filesystem.js'
@@ -126,5 +128,143 @@ describe('cache helpers', () => {
 		expect(await fileExists(join(root, 'page.html.gz'))).toBe(false)
 		expect(await fileExists(join(root, 'page.html.br'))).toBe(true)
 		expect(await fileExists(join(root, 'page.html.zst'))).toBe(false)
+	})
+
+	describe('disabled output sidecar cleanup', () => {
+		it('removes sidecars for disabled algorithms on a cache miss', async () => {
+			const root = await setup()
+			const output = join(root, 'dist', 'page.html')
+			const cacheDirectory = join(root, 'cache')
+
+			await mkdir(join(root, 'dist'), { recursive: true })
+			await mkdir(cacheDirectory, { recursive: true })
+
+			await writeFile(`${output}.gz`, 'gzip')
+			await writeFile(`${output}.br`, 'brotli')
+			await writeFile(`${output}.zst`, 'zstd')
+
+			await removeDisabledOutputSidecars(
+				output,
+				{
+					gzip: false,
+					brotli: {},
+					zstd: false,
+				},
+				false,
+			)
+
+			expect(await fileExists(`${output}.gz`)).toBe(false)
+			expect(await fileExists(`${output}.br`)).toBe(true)
+			expect(await fileExists(`${output}.zst`)).toBe(false)
+		})
+
+		it('preserves output sidecars on a cache hit', async () => {
+			const root = await setup()
+			const output = join(root, 'dist', 'page.html')
+
+			await mkdir(join(root, 'dist'), { recursive: true })
+
+			await writeFile(`${output}.gz`, 'gzip')
+			await writeFile(`${output}.br`, 'stale-brotli')
+			await writeFile(`${output}.zst`, 'stale-zstd')
+
+			await removeDisabledOutputSidecars(
+				output,
+				{
+					gzip: {},
+					brotli: false,
+					zstd: false,
+				},
+				true,
+			)
+
+			expect(await fileExists(`${output}.gz`)).toBe(true)
+			expect(await readFile(`${output}.br`, 'utf8')).toBe('stale-brotli')
+			expect(await readFile(`${output}.zst`, 'utf8')).toBe('stale-zstd')
+		})
+
+		it('does not remove enabled sidecars', async () => {
+			const root = await setup()
+			const output = join(root, 'dist', 'page.html')
+
+			await mkdir(join(root, 'dist'), { recursive: true })
+
+			await writeFile(`${output}.gz`, 'gzip')
+			await writeFile(`${output}.br`, 'brotli')
+			await writeFile(`${output}.zst`, 'zstd')
+
+			await removeDisabledOutputSidecars(
+				output,
+				{
+					gzip: {},
+					brotli: {},
+					zstd: false,
+				},
+				false,
+			)
+
+			expect(await readFile(`${output}.gz`, 'utf8')).toBe('gzip')
+			expect(await readFile(`${output}.br`, 'utf8')).toBe('brotli')
+			expect(await fileExists(`${output}.zst`)).toBe(false)
+		})
+	})
+
+	describe('hasCacheHit', () => {
+		it('returns true when the source hash matches and all enabled artifacts exist', async () => {
+			const root = await setup()
+
+			await writeFile(join(root, 'page.html.gz'), 'gzip')
+			await writeFile(join(root, 'page.html.br'), 'brotli')
+
+			await expect(
+				hasCacheHit(root, 'page.html', 'same-hash', 'same-hash', false, {
+					gzip: {},
+					brotli: {},
+					zstd: false,
+				}),
+			).resolves.toBe(true)
+		})
+
+		it('returns false when a required cache artifact is missing', async () => {
+			const root = await setup()
+
+			await writeFile(join(root, 'page.html.gz'), 'gzip')
+
+			await expect(
+				hasCacheHit(root, 'page.html', 'same-hash', 'same-hash', false, {
+					gzip: {},
+					brotli: {},
+					zstd: false,
+				}),
+			).resolves.toBe(false)
+		})
+
+		it('returns false when the source hash differs', async () => {
+			const root = await setup()
+
+			await writeFile(join(root, 'page.html.gz'), 'gzip')
+
+			await expect(
+				hasCacheHit(root, 'page.html', 'new-hash', 'old-hash', false, {
+					gzip: {},
+					brotli: false,
+					zstd: false,
+				}),
+			).resolves.toBe(false)
+		})
+
+		it('returns false when recompression is forced', async () => {
+			const root = await setup()
+
+			await writeFile(join(root, 'page.html.gz'), 'gzip')
+
+			await expect(
+				hasCacheHit(root, 'page.html', 'same-hash', 'same-hash', true, {
+					gzip: {},
+					brotli: false,
+					zstd: false,
+				}),
+			).resolves.toBe(false)
+		})
 	})
 })

@@ -7,6 +7,7 @@ import { INTEGRATION_NAME } from '../src/constants.js'
 import { createMockLogger } from './helpers/logger.js'
 import type { AstroIntegration } from 'astro'
 import { createTempDir } from './helpers/filesystem.js'
+import { fastBrotli } from './helpers/options.js'
 
 type ConfigSetupHook = NonNullable<AstroIntegration['hooks']['astro:config:setup']>
 type BuildDoneHook = NonNullable<AstroIntegration['hooks']['astro:build:done']>
@@ -68,6 +69,33 @@ describe('Astro integration', () => {
 		)
 		expect(() => precompressor({ filters: { minSize: Number.NaN } })).toThrow(
 			'minSize must be a non-negative',
+		)
+	})
+
+	it('initializes Brotli-only configuration and warns for silly file types', async () => {
+		const root = await setup()
+		const cachePath = join(root, '.astro')
+		const logger = createMockLogger()
+
+		await mkdir(cachePath, { recursive: true })
+
+		const integration = precompressor({
+			algorithms: {
+				gzip: false,
+				brotli: fastBrotli,
+			},
+			filters: {
+				fileTypes: ['.bin'],
+			},
+		})
+
+		await integration.hooks['astro:config:setup']?.({
+			config: { cacheDir: pathToFileURL(`${cachePath}/`) },
+			logger,
+		} as ConfigSetupContext)
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.stringContaining('Compressing .bin files is silly'),
 		)
 	})
 

@@ -12,7 +12,14 @@ import { ALGORITHM_EXTENSIONS, INTEGRATION_NAME, SUPPORTED_ALGORITHMS } from './
 
 import { runWorkerPool } from './worker-pool.js'
 
-import { loadCache, saveCache, pruneCache, removeDisabledArtifacts } from './cache.js'
+import {
+	loadCache,
+	saveCache,
+	pruneCache,
+	removeDisabledArtifacts,
+	hasCacheHit,
+	removeDisabledOutputSidecars,
+} from './cache.js'
 
 import { compressFile } from './compression.js'
 
@@ -338,6 +345,15 @@ export async function runBuild(
 
 				const currentHash = await hashFile(file.path)
 				const cachedHash = cache.entries[file.key]
+				const cacheHit = await hasCacheHit(
+					artifactDirectory,
+					file.key,
+					currentHash,
+					cachedHash,
+					forceRecompress,
+					options.algorithms,
+				)
+				await removeDisabledOutputSidecars(file.path, options.algorithms, cacheHit)
 
 				const result = await compressFile(
 					file.path,

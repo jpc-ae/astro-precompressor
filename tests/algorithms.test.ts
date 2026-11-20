@@ -23,9 +23,9 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { CompressorFactory } from '../src/types.js'
 import { createNodeError } from './helpers/errors.js'
-import { fastGzip } from './helpers/options.js'
+import { fastGzip, fastZstd } from './helpers/options.js'
 
-const { constants, gunzipSync, brotliDecompressSync } = zlib
+const { constants, gunzipSync, brotliDecompressSync, zstdDecompressSync } = zlib
 
 async function compress(factory: CompressorFactory) {
 	const chunks: Buffer[] = []
@@ -75,6 +75,22 @@ describe('gzip options and compressor', () => {
 		const factory = await createGzipCompressorFactory({}, false, true, zopfliImporter)
 		expect(gunzipSync(await compress(factory)).toString()).toBe('test payload')
 		expect(zopfliImporter).toHaveBeenCalled()
+	})
+
+	it('falls back to native gzip when optional Zopfli is missing', async () => {
+		const missingPackage = createNodeError("'node-zopfli-es'", 'ERR_MODULE_NOT_FOUND')
+		const zopfliImporter = vi.fn(async () => {
+			throw missingPackage
+		})
+		const zlibFactory = vi.fn(zlib.createGzip)
+
+		const factory = await createGzipCompressorFactory({}, false, true, zopfliImporter, zlibFactory)
+
+		const compressed = await compress(factory)
+
+		expect(gunzipSync(compressed).toString()).toBe('test payload')
+		expect(zopfliImporter).toHaveBeenCalledOnce()
+		expect(zlibFactory).toHaveBeenCalledOnce()
 	})
 
 	it('throws when Zopfli is explicitly requested but not available', async () => {
@@ -194,6 +210,15 @@ describe('zstandard option conversion', () => {
 				null,
 			),
 		).rejects.toThrow('chunkSize')
+	})
+
+	it('creates a valid Zstandard stream through the zstd-napi fallback', async () => {
+		// Passing null disables Node's native factory and forces the fallback.
+		const factory = await createZstdCompressorFactory(fastZstd, null)
+
+		const compressed = await compress(factory)
+
+		expect(zstdDecompressSync(compressed).toString()).toBe('test payload')
 	})
 })
 

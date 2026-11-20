@@ -151,34 +151,32 @@ export async function compressFile(
 ): Promise<{
 	compressions: CompressionResult[]
 }> {
-	// Each algorithm has its own independent input stream.
-	// Promise.allSettled ensures that one failed algorithm does not
-	// prevent the other algorithms from completing.
+	const enabledAlgorithms = Object.entries(options.algorithms)
+		.filter(([, enabled]) => enabled)
+		.map(([algorithm]) => algorithm as keyof typeof options.algorithms)
+
+	// Validate everything before starting any asynchronous work.
+	for (const algorithm of enabledAlgorithms) {
+		if (!compressors[algorithm]) {
+			throw new Error(`[${INTEGRATION_NAME}] Error: the ${algorithm} compressor could not be found`)
+		}
+	}
+
 	const processors: Promise<CompressionResult>[] = []
-	for (const [algorithm, value] of Object.entries(options.algorithms)) {
-		if (!value) {
-			continue
-		}
 
-		const typedAlgorithm = algorithm as keyof typeof options.algorithms
-		if (!compressors[typedAlgorithm]) {
-			throw new Error(
-				`[${INTEGRATION_NAME}] Error: the ${typedAlgorithm} compressor could not be found`,
-			)
-		}
-
+	for (const algorithm of enabledAlgorithms) {
 		processors.push(
 			processAlgorithm(
 				sourcePath,
 				artifactDirectory,
 				relativePath,
-				typedAlgorithm,
+				algorithm,
 				currentHash,
 				cachedHash,
 				forceRecompress,
 				options,
 				logger,
-				compressors[typedAlgorithm],
+				compressors[algorithm] as CompressorFactory,
 				semaphore,
 			),
 		)

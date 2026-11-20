@@ -142,27 +142,6 @@ function testAstroFixture(fixtureDefinition: Fixture): void {
 			await writeFile(resolve(fixture.directory, 'public/included.txt'), originalIncludedText)
 		})
 
-		it('preserves existing output when Vite emptyOutDir is disabled', async () => {
-			const preservedFile = resolve(fixture.output, 'preserved-by-vite.txt')
-			const staleSidecar = resolve(fixture.output, 'index.html.br')
-			const preservedContents =
-				'This file must survive when Vite does not empty the output directory.'
-			const staleContents = Buffer.from('pre-existing sidecar')
-
-			await mkdir(fixture.output, { recursive: true })
-			await writeFile(preservedFile, preservedContents)
-			await writeFile(staleSidecar, staleContents)
-
-			await build('preserveOutput')
-
-			expect(await readFile(preservedFile, 'utf8')).toBe(preservedContents)
-			expect(await readFile(staleSidecar)).toEqual(staleContents)
-			// The selected scenario emits gzip only; the pre-existing Brotli sidecar is not ours to clean up.
-			const original = await readOutput(fixture, 'index.html')
-			const gzip = gunzipSync(await readOutput(fixture, 'index.html.gz'))
-			expect(gzip.equals(original)).toBe(true)
-		})
-
 		it('generates valid Gzip and Brotli files in a real Astro build', async () => {
 			await build('basic')
 
@@ -311,6 +290,58 @@ function testAstroFixture(fixtureDefinition: Fixture): void {
 
 			expect(compressed.equals(original)).toBe(true)
 			expect(original.toString()).toBe(changedText)
+		})
+
+		it('preserves unrelated output but removes stale disabled sidecars on a cache miss', async () => {
+			const preservedFile = resolve(fixture.output, 'preserved-by-vite.txt')
+
+			const staleSidecar = resolve(fixture.output, 'index.html.br')
+
+			const preservedContents =
+				'This file must survive when Vite does not empty the output directory.'
+			const staleContents = Buffer.from('pre-existing sidecar')
+
+			await mkdir(fixture.output, { recursive: true })
+			await writeFile(preservedFile, preservedContents)
+			await writeFile(staleSidecar, staleContents)
+
+			await build('preserveOutput')
+
+			// Vite's emptyOutDir:false still preserves unrelated files.
+			expect(await readFile(preservedFile, 'utf8')).toBe(preservedContents)
+
+			// The pre-existing Brotli sidecar is stale because this scenario enables gzip only.
+			await expect(readOutput(fixture, 'index.html.br')).rejects.toMatchObject({
+				code: 'ENOENT',
+			})
+
+			const original = await readOutput(fixture, 'index.html')
+			const gzip = gunzipSync(await readOutput(fixture, 'index.html.gz'))
+
+			expect(gzip.equals(original)).toBe(true)
+		})
+
+		it('preserves disabled sidecars when the file has a full cache hit', async () => {
+			// First build creates the gzip cache entry.
+			await build('preserveOutput')
+
+			const staleSidecar = resolve(fixture.output, 'index.html.br')
+			const staleContents = Buffer.from('deliberately preserved stale Brotli sidecar')
+
+			// Simulate a sidecar left behind by an older build or external process.
+			await writeFile(staleSidecar, staleContents)
+
+			// The same build configuration and unchanged source should hit the cache.
+			await build('preserveOutput')
+
+			// The requested cache-hit exception means the sidecar is left untouched.
+			expect(await readOutput(fixture, 'index.html.br')).toEqual(staleContents)
+
+			// The enabled gzip artifact remains valid.
+			const original = await readOutput(fixture, 'index.html')
+			const gzip = gunzipSync(await readOutput(fixture, 'index.html.gz'))
+
+			expect(gzip.equals(original)).toBe(true)
 		})
 	})
 }

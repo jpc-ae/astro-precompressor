@@ -155,3 +155,64 @@ export async function removeDisabledArtifacts(
 		}
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Cache-hit detection
+// -----------------------------------------------------------------------------
+
+export async function hasCacheHit(
+	artifactDirectory: string,
+	relativePath: string,
+	currentHash: string,
+	cachedHash: string | undefined,
+	forceRecompress: boolean,
+	algorithms: ResolvedAlgorithmOptions,
+): Promise<boolean> {
+	if (forceRecompress || currentHash !== cachedHash) {
+		return false
+	}
+
+	const enabledAlgorithms = Object.entries(algorithms).filter(([, enabled]) => enabled)
+
+	if (enabledAlgorithms.length === 0) {
+		return false
+	}
+
+	for (const [algorithm] of enabledAlgorithms) {
+		const typedAlgorithm = algorithm as keyof typeof ALGORITHM_EXTENSIONS
+		const artifactPath = getArtifactPath(
+			artifactDirectory,
+			relativePath,
+			ALGORITHM_EXTENSIONS[typedAlgorithm],
+		)
+
+		if (!(await fileExists(artifactPath))) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// -----------------------------------------------------------------------------
+// Remove disabled output sidecars
+// -----------------------------------------------------------------------------
+
+export async function removeDisabledOutputSidecars(
+	sourcePath: string,
+	algorithms: ResolvedAlgorithmOptions,
+	cacheHit: boolean,
+): Promise<void> {
+	// On a cache hit, preserve the existing output directory unchanged.
+	if (cacheHit) {
+		return
+	}
+
+	for (const [algorithm, extension] of Object.entries(ALGORITHM_EXTENSIONS)) {
+		const typedAlgorithm = algorithm as keyof typeof ALGORITHM_EXTENSIONS
+
+		if (!algorithms[typedAlgorithm]) {
+			await rm(`${sourcePath}${extension}`, { force: true })
+		}
+	}
+}
