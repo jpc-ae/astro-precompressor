@@ -3,7 +3,7 @@ name: Create GitHub Release
 on:
   push:
     tags:
-      - 'v*'
+    - 'v*'
 
 permissions:
   contents: read
@@ -13,53 +13,53 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+    - name: Checkout
+      uses: actions/checkout@v7
 
-      - name: Setup pnpm and Node.js
-        uses: pnpm/setup@v3
-        with:
-          runtime: node@24
-          require-lockfile: true
+    - name: Setup pnpm and Node.js
+      uses: pnpm/setup@v3
+      with:
+        runtime: node@24
+        require-lockfile: true
 
-      - name: Confirm versions
-        run: |
-          node --version
-          pnpm --version
+    - name: Confirm versions
+      run: |
+        node --version
+        pnpm --version
 
-      - name: Check tag matches package version
-        shell: bash
-        run: |
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+    - name: Check tag matches package version
+      shell: bash
+      run: |
+        PACKAGE_VERSION=$(node -p "require('./package.json').version")
+        TAG_VERSION="${GITHUB_REF_NAME#v}"
 
-          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
-            echo "Tag version ($TAG_VERSION) does not match package.json ($PACKAGE_VERSION)"
-            exit 1
-          fi
+        if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
+          echo "Tag version ($TAG_VERSION) does not match package.json ($PACKAGE_VERSION)"
+          exit 1
+        fi
 
-      - name: Run tests
-        run: pnpm test:all
+    - name: Run tests
+      run: pnpm test:all
 
-      - name: Build package
-        run: pnpm build
+    - name: Build package
+      run: pnpm build
 
-      - name: Check package contents
-        run: pnpm pack --dry-run
+    - name: Check package contents
+      run: pnpm pack --dry-run
 
-      - name: Generate GitHub App Token
-        id: app-token
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.APP_CLIENT_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: jpc-ae
-          repositories: astro-precompressor
+    - name: Generate GitHub App Token
+      id: app-token
+      uses: actions/create-github-app-token@v3
+      with:
+        client-id: ${{ vars.APP_CLIENT_ID }}
+        private-key: ${{ secrets.APP_PRIVATE_KEY }}
+        owner: jpc-ae
+        repositories: astro-precompressor
 
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            --verify-tag
+    - name: Create GitHub Release
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token }}
+      run: |
+        gh release create "${GITHUB_REF_NAME}" \
+          --generate-notes \
+          --verify-tag

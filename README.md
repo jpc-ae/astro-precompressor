@@ -3,6 +3,11 @@
 An Astro integration that precompresses build output using Gzip, Brotli and,
 optionally, Zstandard.
 
+[![Tests](https://github.com/jpc-ae/astro-precompressor/actions/workflows/tests.yml/badge.svg)](https://github.com/jpc-ae/astro-precompressor/actions/workflows/tests.yml)
+
+[![Latest](https://img.shields.io/npm/v/astro-precompressor)](https://www.npmjs.com/package/astro-precompressor)
+[![License](https://img.shields.io/github/license/jpc-ae/astro-precompressor)](LICENSE)
+
 `astro-precompressor` runs after Astro finishes building your project,
 generating compressed sidecar files alongside eligible output files for your
 server to use instead of on-the-fly compression. It uses incremental caching to

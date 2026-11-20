@@ -13,22 +13,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+    - name: Checkout
+      uses: actions/checkout@v7
 
-      - name: Setup pnpm and Node.js
-        uses: pnpm/setup@v3
-        with:
-          runtime: node@24
-          require-lockfile: true
+    - name: Setup pnpm and Node.js
+      uses: pnpm/setup@v3
+      with:
+        runtime: node@24
+        require-lockfile: true
 
-      - name: Confirm versions
-        run: |
-          node --version
-          pnpm --version
+    - name: Confirm versions
+      run: |
+        node --version
+        pnpm --version
 
-      - name: Build package
-        run: pnpm build
+    - name: Build package
+      run: pnpm build
 
-      - name: Publish to npm
-        run: pnpm publish --provenance
+    - name: Publish to npm
+      run: pnpm publish --provenance
