@@ -410,7 +410,7 @@ Files are matched in the following order:
    skipped.
 2. Files matching an exclude pattern are skipped.
 3. Files with extensions not listed in fileTypes are skipped.
-4. Files smaller than minSize are skipped.
+4. Files smaller than `minSize` are skipped.
 
 ### Performance
 
