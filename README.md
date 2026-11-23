@@ -540,7 +540,7 @@ Gzip. Files beneath `drafts/` are excluded entirely.
 > [!TIP]
 > Because files only need to match one include pattern, adding `**` or
 > `'**/**'` (which match all file paths) to the include list causes all
-> otherwise eligible files pass the include filter, regardless of any other
+> otherwise eligible files to pass the include filter, regardless of any other
 > include patterns specified.
 
 ### Performance
