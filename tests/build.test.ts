@@ -253,6 +253,41 @@ describe('runBuild', () => {
 		})
 	})
 
+	it.for(['**', '**/**'])('matches ordinary files with the glob pattern %s', async pattern => {
+		const { output, cache } = await setup()
+
+		await mkdir(join(output, '.private'), { recursive: true })
+		await writeFile(join(output, 'index.html'), '<html>root page</html>')
+		await writeFile(join(output, 'nested', 'about.html'), '<html>nested page</html>')
+		await writeFile(join(output, '.hidden.html'), '<html>hidden file</html>')
+		await writeFile(join(output, '.private', 'page.html'), '<html>hidden directory</html>')
+
+		await runBuild(
+			output,
+			cache,
+			'config-a',
+			createResolvedOptions({
+				filters: {
+					include: [pattern],
+				},
+			}),
+			createMockLogger(),
+			{ brotli: createBrotliCompressorFactory() },
+		)
+
+		// Ordinary files should match at any depth.
+		expect(await readFile(join(output, 'index.html.br'))).toBeDefined()
+		expect(await readFile(join(output, 'nested', 'about.html.br'))).toBeDefined()
+
+		// Picomatch's default dot:false should exclude hidden paths.
+		await expect(readFile(join(output, '.hidden.html.br'))).rejects.toMatchObject({
+			code: 'ENOENT',
+		})
+		await expect(readFile(join(output, '.private', 'page.html.br'))).rejects.toMatchObject({
+			code: 'ENOENT',
+		})
+	})
+
 	it('does not follow symbolic links during discovery', async () => {
 		const { output, cache, root } = await setup()
 		const outside = join(root, 'outside.html')
@@ -304,7 +339,7 @@ describe('runBuild', () => {
 				createMockLogger(),
 				{},
 			),
-		).rejects.toThrow('no eligible algorithms')
+		).rejects.toThrow('No algorithms are enabled')
 	})
 
 	it('records a file compression failure but continues processing other files when failOnError is false', async () => {

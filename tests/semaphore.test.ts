@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Semaphore } from '../src/semaphore.js'
 
 describe('Semaphore', () => {
-	it.each([0, -1, 1.5, Number.NaN])('rejects invalid limit %s', limit => {
+	it.for([0, -1, 1.5, Number.NaN])('rejects invalid limit %s', limit => {
 		expect(() => new Semaphore(limit)).toThrow('positive integer')
 	})
 	it('allows the configured number of concurrent tasks', async () => {
@@ -56,7 +56,7 @@ describe('Semaphore', () => {
 })
 
 describe('Semaphore edge cases', () => {
-	it.each([0, -1, 1.5, Number.NaN])('rejects invalid limit %s', limit => {
+	it.for([0, -1, 1.5, Number.NaN])('rejects invalid limit %s', limit => {
 		expect(() => new Semaphore(limit)).toThrow('positive integer')
 	})
 

@@ -61,15 +61,11 @@ describe('gzip options and compressor', () => {
 	})
 
 	it('creates valid gzip streams with zlib when Zopfli is not requested', async () => {
-		const factory = await createGzipCompressorFactory(
-			fastGzip,
-			false,
-			false,
-		)
+		const factory = await createGzipCompressorFactory(fastGzip, false, false)
 		const stream = await factory()
 		expect(stream).toBeInstanceOf(zlib.Gzip)
 		stream.destroy()
-		
+
 		expect(gunzipSync(await compress(factory)).toString()).toBe('test payload')
 	})
 
@@ -102,7 +98,12 @@ describe('gzip options and compressor', () => {
 		const zopfliImporter = async () => {
 			throw nodeError
 		}
-		const factoryPromise = createGzipCompressorFactory({ zopfli: DEFAULT_ZOPFLI_OPTIONS }, true, false, zopfliImporter)
+		const factoryPromise = createGzipCompressorFactory(
+			{ zopfli: DEFAULT_ZOPFLI_OPTIONS },
+			true,
+			false,
+			zopfliImporter,
+		)
 		await expect(factoryPromise).rejects.toThrow(
 			'The "node-zopfli-es" package is required when Zopfli is explicitly enabled. Install it with: pnpm add -D node-zopfli-es',
 		)
@@ -114,9 +115,7 @@ describe('gzip options and compressor', () => {
 			throw nodeError
 		}
 		const factoryPromise = createGzipCompressorFactory({}, false, true, zopfliImporter)
-		await expect(factoryPromise).rejects.toThrow(
-			nodeError,
-		)
+		await expect(factoryPromise).rejects.toThrow(nodeError)
 	})
 })
 
@@ -289,7 +288,7 @@ describe('complete Zstandard parameter mapping', () => {
 		})
 	})
 
-	it.each([160, 200, 201, 202])('rejects non-boolean values for boolean parameter %i', id => {
+	it.for([160, 200, 201, 202])('rejects non-boolean values for boolean parameter %i', id => {
 		expect(() => toZstdNapiOptions({ params: { [id]: 2 } })).toThrow('Invalid boolean')
 	})
 

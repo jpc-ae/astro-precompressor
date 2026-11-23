@@ -53,7 +53,7 @@ describe('Astro integration', () => {
 		).toThrow('At least one compression algorithm')
 	})
 
-	it.each([0, -1, 1.5, Number.NaN])('validates concurrency %s', concurrency => {
+	it.for([0, -1, 1.5, Number.NaN])('validates concurrency %s', concurrency => {
 		expect(() => precompressor({ performance: { concurrency } })).toThrow(
 			'concurrency must be a positive integer',
 		)
@@ -99,7 +99,7 @@ describe('Astro integration', () => {
 		)
 	})
 
-	it.each([-1, 3, 1.5])('validates log level %s', logLevel => {
+	it.for([-1, 3, 1.5])('validates log level %s', logLevel => {
 		// @ts-expect-error Deliberately pass invalid values to test runtime validation
 		expect(() => precompressor({ logLevel })).toThrow('logLevel must be 0, 1, or 2')
 	})
@@ -144,8 +144,8 @@ describe('Astro integration', () => {
 		expect(() =>
 			precompressor({
 				filters: {
-					include: ['**/*.html', { pattern: '**/*.css', algorithms: ['gzip', 'brotli'] }],
-					exclude: ['**/admin/**', { pattern: '**/*.svg', algorithms: ['gzip'] }],
+					include: ['**/*.{html|js}', { pattern: '**/*.css', algorithms: ['gzip', 'brotli'] }],
+					exclude: ['**/admin/**', { pattern: '**/*.(svg|txt)', algorithms: ['gzip'] }],
 				},
 			}),
 		).not.toThrow()
@@ -186,7 +186,7 @@ describe('Astro integration', () => {
 		)
 	})
 
-	it('rejects invalid glob patterns', () => {
+	it.for(['[', '{', '@(foo', '!(foo'])('rejects invalid glob pattern %s', () => {
 		expect(() =>
 			precompressor({
 				filters: {

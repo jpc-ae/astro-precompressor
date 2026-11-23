@@ -48,7 +48,7 @@ describe('cache helpers', () => {
 		})
 	})
 
-	it.each([
+	it.for([
 		'{broken',
 		JSON.stringify({ version: 99, entries: {} }),
 		JSON.stringify({ version: 1, entries: [] }),
@@ -160,7 +160,7 @@ describe('cache helpers', () => {
 			await writeFile(`${output}.br`, 'stale-brotli')
 			await writeFile(`${output}.zst`, 'stale-zstd')
 
-			await removeDisabledOutputSidecars(output, ['gzip'], false)
+			await removeDisabledOutputSidecars(output, ['gzip'], true)
 
 			expect(await fileExists(`${output}.gz`)).toBe(true)
 			expect(await readFile(`${output}.br`, 'utf8')).toBe('stale-brotli')

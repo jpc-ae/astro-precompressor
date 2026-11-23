@@ -56,7 +56,7 @@ function validateGlobFilters(
 		// Compile here so invalid glob syntax fails during configuration,
 		// rather than unexpectedly failing during the build.
 		try {
-			picomatch(pattern)
+			picomatch(pattern, { strictBrackets: true })
 		} catch (error) {
 			throw new Error(`[${INTEGRATION_NAME}] Invalid ${name} glob pattern "${pattern}".`, {
 				cause: error,

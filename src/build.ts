@@ -63,7 +63,7 @@ function resolveGlobFilters(filters: FilterOptions): {
 
 			return {
 				pattern,
-				match: picomatch(pattern),
+				match: picomatch(pattern, { strictBrackets: true }),
 				algorithms: typeof filter === 'string' ? undefined : filter.algorithms,
 			}
 		})
@@ -141,7 +141,7 @@ async function findFiles(
 	// Algorithm-scoped excludes are handled later per file.
 	const globalExcludes = (exclude ?? [])
 		.filter((filter): filter is string => typeof filter === 'string')
-		.map(pattern => picomatch(pattern))
+		.map(pattern => picomatch(pattern, { strictBrackets: true }))
 
 	function isGloballyExcluded(relativePath: string): boolean {
 		return globalExcludes.some(match => match(relativePath))
@@ -327,6 +327,9 @@ export async function runBuild(
 	const resolvedFilters = resolveGlobFilters(options.filters)
 
 	const enabledAlgorithms = getEnabledAlgorithms(options.algorithms)
+	if (enabledAlgorithms.length === 0) {
+		throw new Error(`[${INTEGRATION_NAME}] No algorithms are enabled.`)
+	}
 
 	const eligibleFiles: Array<{
 		path: string

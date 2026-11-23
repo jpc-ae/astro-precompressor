@@ -53,7 +53,7 @@ describe('utility functions', () => {
 		])
 	})
 
-	it.each(['', '.', '..', 'a/b', 'a\\b'])('rejects invalid extension %j', extension => {
+	it.for(['', '.', '..', 'a/b', 'a\\b'])('rejects invalid extension %j', extension => {
 		expect(() => normalizeExtensions([extension])).toThrow('Invalid file extension')
 	})
 

@@ -229,25 +229,38 @@ function testAstroFixture(fixtureDefinition: Fixture): void {
 			})
 		})
 
-		it('respects include patterns', async () => {
-			await build('picomatchOnly')
+		it('respects picomatch patterns with algorithm filters', async () => {
+			await build('picomatch')
 
-			// `**/*.txt` is included
-			const original = await readOutput(fixture, 'included.txt')
-			const gzip = gunzipSync(await readOutput(fixture, 'included.txt.gz'))
+			// `**/*.txt` is included but brotli is excluded
+			const originalTxt = await readOutput(fixture, 'included.txt')
+			const gzipTxt = gunzipSync(await readOutput(fixture, 'included.txt.gz'))
+			expect(gzipTxt.equals(originalTxt)).toBe(true)
+			await expect(readOutput(fixture, 'included.txt.br')).rejects.toMatchObject({
+				code: 'ENOENT',
+			})
 
-			expect(gzip.equals(original)).toBe(true)
-
-			// .html and .bin do not match the include pattern
+			// `**/*.html` is only included for brotli
+			const originalHtml = await readOutput(fixture, 'index.html')
+			const brotliHtml = brotliDecompressSync(await readOutput(fixture, 'index.html.br'))
+			expect(brotliHtml.equals(originalHtml)).toBe(true)
 			await expect(readOutput(fixture, 'index.html.gz')).rejects.toMatchObject({
 				code: 'ENOENT',
 			})
+
+			// .bin does not match the include patterns
 			await expect(readOutput(fixture, 'unmatched.bin.gz')).rejects.toMatchObject({
+				code: 'ENOENT',
+			})
+			await expect(readOutput(fixture, 'unmatched.bin.br')).rejects.toMatchObject({
 				code: 'ENOENT',
 			})
 
 			// `ignored/**` is excluded
 			await expect(readOutput(fixture, 'ignored/ignored.txt.gz')).rejects.toMatchObject({
+				code: 'ENOENT',
+			})
+			await expect(readOutput(fixture, 'ignored/ignored.txt.br')).rejects.toMatchObject({
 				code: 'ENOENT',
 			})
 		})

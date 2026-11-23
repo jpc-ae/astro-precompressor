@@ -68,13 +68,16 @@ const configurations: Record<string, CompressionOptions> = {
 			exclude: ['ignored/**'],
 		},
 	},
-	picomatchOnly: {
-		algorithms: gzipOnly,
+	picomatch: {
+		algorithms: {
+			gzip: fastGzip,
+			brotli: fastBrotli,
+		},
 		filters: {
 			fileTypes: ['.html', '.txt', '.bin'],
 			minSize: 1,
-			include: ['**/*.txt'],
-			exclude: ['ignored/**'],
+			include: ['**/*.txt', { pattern: '**/*.html', algorithms: ['brotli'] }],
+			exclude: ['ignored/**', { pattern: '**/*.txt', algorithms: ['brotli'] }],
 		},
 	},
 	fileTypesNotIncluded: {

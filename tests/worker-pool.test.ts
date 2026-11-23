@@ -16,7 +16,7 @@ describe('runWorkerPool', () => {
 		expect(await runWorkerPool([4], 8, async value => value + 1)).toEqual([5])
 	})
 
-	it.each([0, -1, 1.2, Number.NaN])('rejects invalid concurrency %s', async concurrency => {
+	it.for([0, -1, 1.2, Number.NaN])('rejects invalid concurrency %s', async concurrency => {
 		await expect(runWorkerPool([1], concurrency, async value => value)).rejects.toThrow(
 			'positive integer',
 		)
