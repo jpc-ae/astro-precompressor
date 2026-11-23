@@ -63,7 +63,6 @@
 	"markdown": {
 		"formatter": {
 			"enabled": true,
-			"proseWrap": "always",
 			"lineWidth": 80
 		}
 	},

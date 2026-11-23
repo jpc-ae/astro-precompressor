@@ -84,11 +84,11 @@
 		"@types/node": "^26.6.6",
 		"@types/node-zopfli-es": "^0.0.4",
 		"@types/picomatch": "^4.0.3",
-		"@vitest/coverage-v8": "^5.1.0",
-		"astro": "7.4.12",
+		"@vitest/coverage-v8": "^5.1.1",
+		"astro": "7.4.13",
 		"node-zopfli-es": "^2.0.6",
 		"typescript": "^7.0.2",
-		"vitest": "^5.1.0",
+		"vitest": "^5.1.1",
 		"zstd-napi": ">=0.0.12"
 	},
 	"dependencies": {

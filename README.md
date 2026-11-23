@@ -15,7 +15,8 @@ avoid unnecessary recompression between builds (the main motivation for building
 this integration) and supports configurable algorithms, file filtering, and
 performance.
 
-> [!IMPORTANT] For this integration to be useful, your hosting environment must
+> [!IMPORTANT]
+> For this integration to be useful, your hosting environment must
 > be set up for serving precompressed sidecars. See
 > [Configuring Your Hosting Environment](#configuring-your-hosting-environment)
 > for suggestions on how to do this.
@@ -54,7 +55,8 @@ build, you should see compression statistics in your build output.
 16:40:30 [astro-precompressor] Done!
 ```
 
-> [!NOTE] 'combined processing time' refers to the combined processing time of
+> [!NOTE]
+> 'combined processing time' refers to the combined processing time of
 > all compression tasks. Since these tasks run in parallel, the actual time
 > taken for them all to complete will typically be much shorter depending on
 > your concurrency value.
@@ -128,7 +130,8 @@ pnpm add -D node-zopfli-es
 yarn add -D node-zopfli-es
 ```
 
-> [!TIP] The default zopfli settings used by `astro-precompressor` have been
+> [!TIP]
+> The default zopfli settings used by `astro-precompressor` have been
 > tuned for speed without sacrificing compression. If smaller gzip files are a
 > priority, installing `node-zopfli-es` alongside `astro-precompressor` is
 > highly recommended. See the Gzip section under
@@ -152,7 +155,8 @@ export default defineConfig({
 })
 ```
 
-> [!CAUTION] Astro runs integrations in the order they are listed. To avoid
+> [!CAUTION]
+> Astro runs integrations in the order they are listed. To avoid
 > subsequent integrations from affecting compressed files, and to ensure any
 > files created or modified by other integrations are compressed appropriately,
 > always ensure that this integration sits last in the list.
@@ -210,7 +214,8 @@ algorithms: {
 }
 ```
 
-> [!NOTE] The `constants` object used in the algorithm configurations below
+> [!NOTE]
+> The `constants` object used in the algorithm configurations below
 > comes from the `node:zlib` package.
 
 **Gzip**
@@ -246,7 +251,8 @@ gzip: {
 }
 ```
 
-> [!TIP] While higher `numiterations` can produce smaller file sizes, it does so
+> [!TIP]
+> While higher `numiterations` can produce smaller file sizes, it does so
 > at the expense of speed. In testing representative minified Astro output
 > files, setting it to `5` produced files that were identical in size to `15`
 > (the engine default) while being three times faster. `blocksplitting` has also
@@ -308,7 +314,8 @@ zstd: {
 }
 ```
 
-> [!CAUTION] 19 is the highest standard compression level. Setting this higher
+> [!CAUTION]
+> 19 is the highest standard compression level. Setting this higher
 > (20–22) turns on ultra mode which is significantly more compute-intensive. If
 > you experiment with these higher levels, consider reducing the
 > `performance.concurrency` option to a conservative value, such as 1, and
@@ -335,7 +342,8 @@ cache: {
 | ------- | ------------------------------------------------------ |
 | `prune` | Remove obsolete cached artifacts and manifest entries. |
 
-> [!NOTE] Prior to v1.2.0, the `prune` option was controlled by setting
+> [!NOTE]
+> Prior to v1.2.0, the `prune` option was controlled by setting
 > `pruneCache` under the `filters` property. It has been moved to its own group
 > for clarity.
 
@@ -450,7 +458,8 @@ filters: {
 A string pattern applies to all globally enabled algorithms. An object pattern
 applies only to the algorithms listed in its `algorithms` array.
 
-> [!IMPORTANT] The top-level `algorithms` and `filters.fileTypes` options are
+> [!IMPORTANT]
+> The top-level `algorithms` and `filters.fileTypes` options are
 > authoritative. Glob filters can restrict which globally enabled algorithms are
 > used for a file, but cannot enable an algorithm that is globally disabled.
 > Likewise, include patterns cannot make a filetype eligible if it is excluded
@@ -496,7 +505,8 @@ passes the `fileTypes` and `minSize` filters.
 | Any matching include pattern                | String pattern             | File excluded           |
 | Include patterns configured, but none match | None                       | File skipped            |
 
-> [!NOTE] The resulting algorithms are always limited to those enabled in the
+> [!NOTE]
+> The resulting algorithms are always limited to those enabled in the
 > top-level `algorithms` configuration. If no algorithms remain after applying
 > the matching rules, the file is skipped.
 
@@ -527,7 +537,8 @@ In this example, HTML files receive every globally enabled algorithm, CSS files
 receive Gzip only, and SVG files receive every globally enabled algorithm except
 Gzip. Files beneath `drafts/` are excluded entirely.
 
-> [!TIP] Because files only need to match one include pattern, adding `**` or
+> [!TIP]
+> Because files only need to match one include pattern, adding `**` or
 > `'**/**'` (which match all file paths) to the include list causes all
 > otherwise eligible files pass the include filter, regardless of any other
 > include patterns specified.
@@ -545,7 +556,8 @@ performance: {
 }
 ```
 
-> [!NOTE] `availableParallelism` comes from the `node:os` package
+> [!NOTE]
+> `availableParallelism` comes from the `node:os` package
 
 | Option                       | Description                                                                                  |
 | ---------------------------- | -------------------------------------------------------------------------------------------- |
@@ -642,7 +654,8 @@ When `logLevel` is set to `2`, debug messages will only be shown when the
 the same output as `logLevel: 1`. The default level is `2` to match Astro's own
 logging conventions.
 
-> [!TIP] Set this value to 0 if you prefer concise logs.
+> [!TIP]
+> Set this value to 0 if you prefer concise logs.
 
 ## Build Lifecycle
 
@@ -654,13 +667,15 @@ The integration uses Astro's build lifecycle hooks:
 - `astro:build:done`: Processes the completed build output and generates
   compressed artifacts.
 
-> [!WARNING] If zopfli is explicitly enabled in your configuration without
+> [!WARNING]
+> If zopfli is explicitly enabled in your configuration without
 > `node-zopfli-es` being installed, your Astro build will fail at the setup
 > stage.
 
 ## Configuring Your Hosting Environment
 
-> [!IMPORTANT] Generating compressed sidecars does not automatically configure
+> [!IMPORTANT]
+> Generating compressed sidecars does not automatically configure
 > your hosting environment to serve them. Your web server, CDN, or hosting
 > provider must support content negotiation and serve the appropriate sidecar
 > when a client advertises support for the algorithm.
@@ -715,10 +730,12 @@ RewriteRule \.eot\.(br|gz)$ - [T=application/vnd.ms-fontobject,E=no-brotli:1,E=n
 </FilesMatch>
 ```
 
-> [!TIP] Adjust the filetypes above to match your `astro-precompressor`
+> [!TIP]
+> Adjust the filetypes above to match your `astro-precompressor`
 > configuration.
 
-> [!WARNING] The `.htaccess` configuration above is representative and does not
+> [!WARNING]
+> The `.htaccess` configuration above is representative and does not
 > guard against a missing `mod_rewrite`. It assumes `mod_headers` and `mod_mime`
 > are available. The encoding conditions reject explicitly disabled encodings
 > (q=0), but do not implement complete quality-value negotiation or wildcard
@@ -752,7 +769,8 @@ server {
 }
 ```
 
-> [!IMPORTANT] Zstandard support is not included as standard in many Nginx
+> [!IMPORTANT]
+> Zstandard support is not included as standard in many Nginx
 > installations. A separately built or third-party module may be required when
 > using this algorithm in your environment.
 
