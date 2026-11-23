@@ -597,11 +597,6 @@ When `cache.prune` is enabled, obsolete cached compression artifacts and
 manifest entries are removed. This keeps the incremental cache from retaining
 entries that are no longer relevant to the current build.
 
-Output sidecars are handled separately from cache pruning. If Vite's
-`build.emptyOutDir` option is manually set to `false`, output sidecars will be
-removed if their source files have changed. Otherwise, they will automatically
-be cleaned up by Vite prior to every build.
-
 ## Output
 
 For each eligible source file, the integration generates one sidecar per enabled
@@ -634,6 +629,13 @@ dist/
 ```
 
 The original files are never modified or replaced.
+
+> [!NOTE]
+> Output sidecars are handled separately from cache pruning. By default, Vite
+> automatically clears the output folder (including any sidecars) prior to each
+> build. If Vite's `build.emptyOutDir` option is manually set to `false`,
+> however, `astro-precompressor` will remove stale sidecars from matched files
+> when it detects that their source files have changed.
 
 ## Logging
 
@@ -731,8 +733,7 @@ RewriteRule \.eot\.(br|gz)$ - [T=application/vnd.ms-fontobject,E=no-brotli:1,E=n
 ```
 
 > [!TIP]
-> Adjust the filetypes above to match your `astro-precompressor`
-> configuration.
+> Adjust the filetypes above to match your `astro-precompressor` configuration.
 
 > [!WARNING]
 > The `.htaccess` configuration above is representative and does not
