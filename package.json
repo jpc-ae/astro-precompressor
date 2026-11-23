@@ -1,6 +1,6 @@
 {
 	"name": "astro-precompressor",
-	"version": "1.2.0",
+	"version": "1.2.1",
 	"description": "Precompresses Astro output document files to Brotli (.br), Gzip (.gz) and optionally Zstandard (.zst)",
 	"main": "./dist/index.js",
 	"exports": {
