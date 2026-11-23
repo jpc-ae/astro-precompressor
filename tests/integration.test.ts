@@ -139,4 +139,76 @@ describe('Astro integration', () => {
 			} as BuildDoneContext),
 		).rejects.toThrow('not initialized correctly')
 	})
+
+	it('accepts string and algorithm-scoped glob filters', () => {
+		expect(() =>
+			precompressor({
+				filters: {
+					include: ['**/*.html', { pattern: '**/*.css', algorithms: ['gzip', 'brotli'] }],
+					exclude: ['**/admin/**', { pattern: '**/*.svg', algorithms: ['gzip'] }],
+				},
+			}),
+		).not.toThrow()
+	})
+
+	it('rejects empty algorithm lists when failOnError is enabled', () => {
+		expect(() =>
+			precompressor({
+				failOnError: true,
+				filters: {
+					include: [{ pattern: '**/*.html', algorithms: [] }],
+				},
+			}),
+		).toThrow('does not specify any algorithms')
+	})
+
+	it('warns and ignores empty algorithm lists when failOnError is disabled', async () => {
+		const root = await setup()
+		const cachePath = join(root, '.astro')
+		const logger = createMockLogger()
+
+		await mkdir(cachePath, { recursive: true })
+
+		const integration = precompressor({
+			failOnError: false,
+			filters: {
+				include: [{ pattern: '**/*.html', algorithms: [] }],
+			},
+		})
+
+		await integration.hooks['astro:config:setup']?.({
+			config: { cacheDir: pathToFileURL(`${cachePath}/`) },
+			logger,
+		} as ConfigSetupContext)
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.stringContaining('Ignoring include filter "**/*.html"'),
+		)
+	})
+
+	it('rejects invalid glob patterns', () => {
+		expect(() =>
+			precompressor({
+				filters: {
+					include: ['['],
+				},
+			}),
+		).toThrow('Invalid include glob pattern')
+	})
+
+	it('rejects unsupported algorithms in glob filters', () => {
+		expect(() =>
+			precompressor({
+				filters: {
+					include: [
+						{
+							pattern: '**/*.html',
+							// @ts-expect-error Deliberately invalid algorithm for runtime validation.
+							algorithms: ['deflate'],
+						},
+					],
+				},
+			}),
+		).toThrow('Unsupported algorithm')
+	})
 })

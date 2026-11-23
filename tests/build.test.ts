@@ -4,10 +4,11 @@ import { brotliDecompressSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
 import { runBuild } from '../src/build.js'
 import { createBrotliCompressorFactory } from '../src/brotli.js'
-import { createResolvedOptions, fastGzip } from './helpers/options.js'
+import { createResolvedOptions, fastBrotli, fastGzip } from './helpers/options.js'
 import { createMockLogger } from './helpers/logger.js'
 import { createTempDir } from './helpers/filesystem.js'
 import { createFailingStreamCompressorFactory } from './helpers/compressors.js'
+import { createGzipCompressorFactory } from '../src/gzip.js'
 
 describe('runBuild', () => {
 	let cleanup: (() => Promise<void>) | undefined
@@ -42,12 +43,14 @@ describe('runBuild', () => {
 			cache,
 			'config-a',
 			createResolvedOptions({
+				cache: {
+					prune: true,
+				},
 				filters: {
 					minSize: 5,
 					fileTypes: ['.html'],
 					include: ['**/*.html'],
 					exclude: ['nested/skip.html'],
-					pruneCache: true,
 				},
 			}),
 			logger,
@@ -65,6 +68,189 @@ describe('runBuild', () => {
 		})
 		await expect(readFile(join(output, 'asset.css.br'))).rejects.toMatchObject({ code: 'ENOENT' })
 		await expect(readFile(join(output, 'tiny.html.br'))).rejects.toMatchObject({ code: 'ENOENT' })
+	})
+
+	it('applies algorithm-scoped include rules', async () => {
+		const { output, cache } = await setup()
+
+		await writeFile(join(output, 'index.html'), '<html>home page content</html>')
+		await writeFile(join(output, 'style.css'), 'body { color: red; }')
+
+		const options = createResolvedOptions({
+			algorithms: {
+				gzip: fastGzip,
+				brotli: fastBrotli,
+				zstd: false,
+			},
+			filters: {
+				fileTypes: ['.html', '.css'],
+				include: ['**/*.html', { pattern: '**/*.css', algorithms: ['gzip'] }],
+			},
+		})
+
+		await runBuild(output, cache, 'config-a', options, createMockLogger(), {
+			gzip: await createGzipCompressorFactory(fastGzip, false, false),
+			brotli: createBrotliCompressorFactory(fastBrotli),
+		})
+
+		// HTML matches the plain rule, so it gets both globally enabled algorithms.
+		expect(await readFile(join(output, 'index.html.gz'))).toBeDefined()
+		expect(await readFile(join(output, 'index.html.br'))).toBeDefined()
+
+		// CSS matches only the scoped rule, so it gets Gzip only.
+		expect(await readFile(join(output, 'style.css.gz'))).toBeDefined()
+		await expect(readFile(join(output, 'style.css.br'))).rejects.toMatchObject({
+			code: 'ENOENT',
+		})
+	})
+
+	it('unions algorithms from overlapping include rules', async () => {
+		const { output, cache } = await setup()
+
+		await writeFile(join(output, 'index.html'), '<html>overlapping rules</html>')
+
+		const options = createResolvedOptions({
+			algorithms: {
+				gzip: fastGzip,
+				brotli: fastBrotli,
+				zstd: false,
+			},
+			filters: {
+				include: [
+					{ pattern: '**/*.html', algorithms: ['gzip'] },
+					{ pattern: '**/*.html', algorithms: ['brotli'] },
+				],
+			},
+		})
+
+		await runBuild(output, cache, 'config-a', options, createMockLogger(), {
+			gzip: await createGzipCompressorFactory(fastGzip, false, false),
+			brotli: createBrotliCompressorFactory(fastBrotli),
+		})
+
+		expect(await readFile(join(output, 'index.html.gz'))).toBeDefined()
+		expect(await readFile(join(output, 'index.html.br'))).toBeDefined()
+	})
+
+	it('allows a plain include rule to select all enabled algorithms', async () => {
+		const { output, cache } = await setup()
+
+		await writeFile(join(output, 'index.html'), '<html>plain rule</html>')
+
+		const options = createResolvedOptions({
+			algorithms: {
+				gzip: fastGzip,
+				brotli: fastBrotli,
+				zstd: false,
+			},
+			filters: {
+				include: [{ pattern: '**/*.html', algorithms: ['gzip'] }, '**/*.html'],
+			},
+		})
+
+		await runBuild(output, cache, 'config-a', options, createMockLogger(), {
+			gzip: await createGzipCompressorFactory(fastGzip, false, false),
+			brotli: createBrotliCompressorFactory(fastBrotli),
+		})
+
+		expect(await readFile(join(output, 'index.html.gz'))).toBeDefined()
+		expect(await readFile(join(output, 'index.html.br'))).toBeDefined()
+	})
+
+	it('applies algorithm-scoped excludes without excluding the whole file', async () => {
+		const { output, cache } = await setup()
+
+		await writeFile(join(output, 'index.html'), '<html>scoped exclusion</html>')
+
+		const options = createResolvedOptions({
+			algorithms: {
+				gzip: fastGzip,
+				brotli: fastBrotli,
+				zstd: false,
+			},
+			filters: {
+				include: ['**/*.html'],
+				exclude: [{ pattern: '**/*.html', algorithms: ['gzip'] }],
+			},
+		})
+
+		await runBuild(output, cache, 'config-a', options, createMockLogger(), {
+			gzip: await createGzipCompressorFactory(fastGzip, false, false),
+			brotli: createBrotliCompressorFactory(fastBrotli),
+		})
+
+		await expect(readFile(join(output, 'index.html.gz'))).rejects.toMatchObject({
+			code: 'ENOENT',
+		})
+		expect(await readFile(join(output, 'index.html.br'))).toBeDefined()
+	})
+
+	it('lets any plain exclude rule veto the file', async () => {
+		const { output, cache } = await setup()
+
+		await writeFile(join(output, 'index.html'), '<html>excluded</html>')
+
+		const options = createResolvedOptions({
+			filters: {
+				include: ['**/*.html'],
+				exclude: ['**/*.html', { pattern: '**/*.html', algorithms: ['brotli'] }],
+			},
+		})
+
+		await runBuild(output, cache, 'config-a', options, createMockLogger(), {
+			brotli: createBrotliCompressorFactory(),
+		})
+
+		await expect(readFile(join(output, 'index.html.br'))).rejects.toMatchObject({
+			code: 'ENOENT',
+		})
+	})
+
+	it('does not select algorithms that are globally disabled', async () => {
+		const { output, cache } = await setup()
+
+		await writeFile(join(output, 'index.html'), '<html>global switch</html>')
+
+		const options = createResolvedOptions({
+			algorithms: {
+				gzip: false,
+				brotli: fastBrotli,
+				zstd: false,
+			},
+			filters: {
+				include: [{ pattern: '**/*.html', algorithms: ['gzip'] }],
+			},
+		})
+
+		await runBuild(output, cache, 'config-a', options, createMockLogger(), {
+			brotli: createBrotliCompressorFactory(),
+		})
+
+		await expect(readFile(join(output, 'index.html.br'))).rejects.toMatchObject({
+			code: 'ENOENT',
+		})
+	})
+
+	it('skips files when no algorithms remain selected', async () => {
+		const { output, cache } = await setup()
+
+		await writeFile(join(output, 'index.html'), '<html>no algorithms</html>')
+
+		const options = createResolvedOptions({
+			filters: {
+				include: [{ pattern: '**/*.html', algorithms: ['gzip'] }],
+			},
+		})
+
+		await expect(
+			runBuild(output, cache, 'config-a', options, createMockLogger(), {
+				brotli: createBrotliCompressorFactory(),
+			}),
+		).resolves.toBeUndefined()
+
+		await expect(readFile(join(output, 'index.html.br'))).rejects.toMatchObject({
+			code: 'ENOENT',
+		})
 	})
 
 	it('does not follow symbolic links during discovery', async () => {

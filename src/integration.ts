@@ -3,7 +3,15 @@ import type { AstroIntegration } from 'astro'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 
-import type { CompressionOptions, ResolvedOptions, Compressors } from './types.js'
+import picomatch from 'picomatch'
+
+import type {
+	CompressionOptions,
+	ResolvedOptions,
+	Compressors,
+	GlobFilter,
+	CompressionAlgorithm,
+} from './types.js'
 
 import {
 	DEFAULT_CONCURRENCY,
@@ -13,6 +21,7 @@ import {
 	SILLY_FILE_TYPES,
 	DEFAULT_ALGORITHMS,
 	DEFAULT_LOG_LEVEL,
+	SUPPORTED_ALGORITHMS,
 } from './constants.js'
 
 import { createConfigHash, normalizeExtensions } from './utils.js'
@@ -22,14 +31,88 @@ import { createZstdCompressorFactory, resolveZstdOptions } from './zstd.js'
 import { createBrotliCompressorFactory, resolveBrotliOptions } from './brotli.js'
 
 // -----------------------------------------------------------------------------
+// Filter helpers
+// -----------------------------------------------------------------------------
+
+function validateGlobFilters(
+	filters: GlobFilter[] | undefined,
+	name: 'include' | 'exclude',
+	failOnError: boolean,
+	warnings: string[],
+): GlobFilter[] | undefined {
+	if (!filters) {
+		return undefined
+	}
+
+	const validFilters: GlobFilter[] = []
+
+	for (const filter of filters) {
+		const pattern = typeof filter === 'string' ? filter : filter.pattern
+
+		if (typeof pattern !== 'string' || pattern.length === 0) {
+			throw new Error(`[${INTEGRATION_NAME}] ${name} filters must have a non-empty pattern.`)
+		}
+
+		// Compile here so invalid glob syntax fails during configuration,
+		// rather than unexpectedly failing during the build.
+		try {
+			picomatch(pattern)
+		} catch (error) {
+			throw new Error(`[${INTEGRATION_NAME}] Invalid ${name} glob pattern "${pattern}".`, {
+				cause: error,
+			})
+		}
+
+		if (typeof filter === 'string') {
+			validFilters.push(filter)
+			continue
+		}
+
+		if (!Array.isArray(filter.algorithms) || filter.algorithms.length === 0) {
+			const message =
+				`[${INTEGRATION_NAME}] Ignoring ${name} filter "${pattern}" ` +
+				'because it does not specify any algorithms.'
+
+			if (failOnError) {
+				throw new Error(message)
+			}
+
+			warnings.push(message)
+			continue
+		}
+
+		const algorithms = [...new Set(filter.algorithms)]
+
+		for (const algorithm of algorithms) {
+			if (!SUPPORTED_ALGORITHMS.includes(algorithm)) {
+				throw new Error(
+					`[${INTEGRATION_NAME}] Unsupported algorithm "${algorithm}" in ${name} filter "${pattern}".`,
+				)
+			}
+		}
+
+		validFilters.push({
+			pattern,
+			algorithms: algorithms as CompressionAlgorithm[],
+		})
+	}
+
+	return validFilters
+}
+
+// -----------------------------------------------------------------------------
 // Option resolution
 // -----------------------------------------------------------------------------
 
 function resolveOptions(userOptions: CompressionOptions): ResolvedOptions {
+	const failOnError = userOptions.failOnError ?? false
+	const filterWarnings: string[] = []
+
 	const algorithms = {
 		...DEFAULT_ALGORITHMS,
 		...userOptions.algorithms,
 	}
+
 	const options: ResolvedOptions = {
 		algorithms: {
 			gzip: resolveGzipOptions(algorithms.gzip),
@@ -41,15 +124,28 @@ function resolveOptions(userOptions: CompressionOptions): ResolvedOptions {
 			incremental: userOptions.performance?.incremental ?? true,
 			discardCompressionIfLarger: userOptions.performance?.discardCompressionIfLarger ?? true,
 		},
+		cache: {
+			prune: userOptions.cache?.prune ?? true,
+		},
 		filters: {
 			minSize: userOptions.filters?.minSize ?? DEFAULT_MIN_SIZE,
 			fileTypes: normalizeExtensions(userOptions.filters?.fileTypes ?? DEFAULT_FILE_TYPES),
-			include: userOptions.filters?.include,
-			exclude: userOptions.filters?.exclude,
-			pruneCache: userOptions.filters?.pruneCache ?? true,
+			include: validateGlobFilters(
+				userOptions.filters?.include,
+				'include',
+				failOnError,
+				filterWarnings,
+			),
+			exclude: validateGlobFilters(
+				userOptions.filters?.exclude,
+				'exclude',
+				failOnError,
+				filterWarnings,
+			),
 		},
+		filterWarnings,
 		logLevel: userOptions.logLevel ?? DEFAULT_LOG_LEVEL,
-		failOnError: userOptions.failOnError ?? false,
+		failOnError,
 		recompressOnConfigChange: userOptions.recompressOnConfigChange ?? false,
 	}
 
@@ -127,6 +223,11 @@ export default function precompressor(userOptions: CompressionOptions = {}): Ast
 
 				if (options.algorithms.brotli) {
 					compressors.brotli = createBrotliCompressorFactory(options.algorithms.brotli)
+				}
+
+				// Emit any warnings
+				for (const warning of options.filterWarnings) {
+					logger.warn(warning)
 				}
 
 				cacheDirectory = resolve(fileURLToPath(config.cacheDir))

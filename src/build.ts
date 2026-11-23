@@ -36,6 +36,7 @@ import {
 	green,
 	bold,
 	toCacheKey,
+	getEnabledAlgorithms,
 } from './utils.js'
 
 import type {
@@ -44,6 +45,7 @@ import type {
 	Compressors,
 	FilterOptions,
 	Logger,
+	ResolvedGlobFilter,
 	ResolvedOptions,
 } from './types.js'
 
@@ -51,21 +53,105 @@ import type {
 // File discovery
 // -----------------------------------------------------------------------------
 
+function resolveGlobFilters(filters: FilterOptions): {
+	include: ResolvedGlobFilter[]
+	exclude: ResolvedGlobFilter[]
+} {
+	function resolve(filters: FilterOptions['include']): ResolvedGlobFilter[] {
+		return (filters ?? []).map(filter => {
+			const pattern = typeof filter === 'string' ? filter : filter.pattern
+
+			return {
+				pattern,
+				match: picomatch(pattern),
+				algorithms: typeof filter === 'string' ? undefined : filter.algorithms,
+			}
+		})
+	}
+
+	return {
+		include: resolve(filters.include),
+		exclude: resolve(filters.exclude),
+	}
+}
+
+function getFileAlgorithms(
+	relativePath: string,
+	filters: ReturnType<typeof resolveGlobFilters>,
+	enabledAlgorithms: CompressionAlgorithm[],
+): CompressionAlgorithm[] {
+	const selected = new Set<CompressionAlgorithm>()
+
+	// No include rules means all globally enabled algorithms are eligible.
+	if (filters.include.length === 0) {
+		for (const algorithm of enabledAlgorithms) {
+			selected.add(algorithm)
+		}
+	} else {
+		// Include rules are OR-based. Matching rules contribute algorithms.
+		for (const filter of filters.include) {
+			if (!filter.match(relativePath)) {
+				continue
+			}
+
+			if (!filter.algorithms) {
+				// A plain string selects every globally enabled algorithm.
+				for (const algorithm of enabledAlgorithms) {
+					selected.add(algorithm)
+				}
+			} else {
+				for (const algorithm of filter.algorithms) {
+					if (enabledAlgorithms.includes(algorithm)) {
+						selected.add(algorithm)
+					}
+				}
+			}
+		}
+	}
+
+	// Exclude rules are also OR-based: any matching rule removes its
+	// algorithms. A plain string excludes the entire file.
+	for (const filter of filters.exclude) {
+		if (!filter.match(relativePath)) {
+			continue
+		}
+
+		if (!filter.algorithms) {
+			selected.clear()
+			break
+		}
+
+		for (const algorithm of filter.algorithms) {
+			selected.delete(algorithm)
+		}
+	}
+
+	// Return in stable supported-algorithm order.
+	return SUPPORTED_ALGORITHMS.filter(algorithm => selected.has(algorithm))
+}
+
 async function findFiles(
 	directory: string,
-	{ fileTypes, include, exclude }: FilterOptions,
+	{ fileTypes, exclude }: FilterOptions,
 ): Promise<string[]> {
 	const files: string[] = []
 	const supportedExtensions = new Set(fileTypes.map(extension => extension.toLowerCase()))
 
-	const isIncluded = include?.length ? picomatch(include) : () => true
-	const isExcluded = exclude?.length ? picomatch(exclude) : () => false
+	// Only plain-string excludes exclude whole files or directories.
+	// Algorithm-scoped excludes are handled later per file.
+	const globalExcludes = (exclude ?? [])
+		.filter((filter): filter is string => typeof filter === 'string')
+		.map(pattern => picomatch(pattern))
+
+	function isGloballyExcluded(relativePath: string): boolean {
+		return globalExcludes.some(match => match(relativePath))
+	}
 
 	function isExcludedDirectory(relativePath: string): boolean {
 		return (
-			isExcluded(relativePath) ||
-			isExcluded(`${relativePath}/`) ||
-			isExcluded(`${relativePath}/__astro_precompressor_probe__`)
+			isGloballyExcluded(relativePath) ||
+			isGloballyExcluded(`${relativePath}/`) ||
+			isGloballyExcluded(`${relativePath}/__astro_precompressor_probe__`)
 		)
 	}
 
@@ -102,7 +188,7 @@ async function findFiles(
 				continue
 			}
 
-			if (isExcluded(relativePath) || !isIncluded(relativePath)) {
+			if (isGloballyExcluded(relativePath)) {
 				continue
 			}
 
@@ -238,11 +324,15 @@ export async function runBuild(
 	// -------------------------------------------------------------------------
 
 	const files = await findFiles(outputDirectory, options.filters)
+	const resolvedFilters = resolveGlobFilters(options.filters)
+
+	const enabledAlgorithms = getEnabledAlgorithms(options.algorithms)
 
 	const eligibleFiles: Array<{
 		path: string
 		key: string
 		size: number
+		algorithms: CompressionAlgorithm[]
 	}> = []
 
 	const currentKeys = new Set<string>()
@@ -258,19 +348,24 @@ export async function runBuild(
 		}
 
 		const key = toCacheKey(outputDirectory, filePath)
+		const relativePath = relative(outputDirectory, filePath).split(sep).join('/')
+
+		const algorithms = getFileAlgorithms(relativePath, resolvedFilters, enabledAlgorithms)
+
+		// No selected algorithms means the file is not part of this build.
+		if (algorithms.length === 0) {
+			continue
+		}
 
 		eligibleFiles.push({
 			path: filePath,
 			key,
 			size: fileStat.size,
+			algorithms,
 		})
 
 		currentKeys.add(key)
 	}
-
-	const enabledAlgorithms = Object.entries(options.algorithms)
-		.filter(([, value]) => value)
-		.map(([algorithm]) => algorithm)
 
 	if (options.logLevel === 0) {
 		logger.info(`Processing ${eligibleFiles.length} eligible files`)
@@ -296,7 +391,7 @@ export async function runBuild(
 	// Prune cache
 	// -------------------------------------------------------------------------
 
-	if (options.filters.pruneCache) {
+	if (options.cache.prune) {
 		try {
 			const removed = await pruneCache(cache, artifactDirectory, currentKeys)
 
@@ -351,9 +446,9 @@ export async function runBuild(
 					currentHash,
 					cachedHash,
 					forceRecompress,
-					options.algorithms,
+					file.algorithms,
 				)
-				await removeDisabledOutputSidecars(file.path, options.algorithms, cacheHit)
+				await removeDisabledOutputSidecars(file.path, file.algorithms, cacheHit)
 
 				const result = await compressFile(
 					file.path,
@@ -366,6 +461,7 @@ export async function runBuild(
 					logger,
 					compressors,
 					semaphore,
+					file.algorithms,
 				)
 
 				logFileResult(logger, options, file.key, file.size, result.compressions)
@@ -415,10 +511,6 @@ export async function runBuild(
 				)
 			}
 		}
-	}
-
-	if (!enabledAlgorithms.length) {
-		throw new Error('There are no eligible algorithms selected.')
 	}
 
 	const workerCount = Math.min(eligibleFiles.length, options.performance.concurrency)

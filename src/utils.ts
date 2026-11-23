@@ -6,9 +6,9 @@ import { isAbsolute, relative, resolve, sep } from 'node:path'
 
 import { styleText } from 'node:util'
 
-import { CACHE_VERSION } from './constants.js'
+import { CACHE_VERSION, SUPPORTED_ALGORITHMS } from './constants.js'
 
-import type { Logger, ResolvedOptions } from './types.js'
+import type { Logger, ResolvedOptions, CompressionAlgorithm, ResolvedAlgorithmOptions } from './types.js'
 
 export function getPackageManager(): string {
 	const ua = process.env.npm_config_user_agent || ''
@@ -19,6 +19,16 @@ export function getPackageManager(): string {
 export function sha256(value: string): string {
 	return createHash('sha256').update(value).digest('hex')
 }
+
+export function getEnabledAlgorithms(
+	algorithms: ResolvedAlgorithmOptions,
+): CompressionAlgorithm[] {
+	return SUPPORTED_ALGORITHMS.filter(algorithm => Boolean(algorithms[algorithm]))
+}
+
+// -----------------------------------------------------------------------------
+// File operations
+// -----------------------------------------------------------------------------
 
 export async function hashFile(path: string): Promise<string> {
 	const hash = createHash('sha256')
@@ -73,44 +83,6 @@ export function resolveInsideDirectory(directory: string, relativePath: string):
 	}
 
 	return resolvedPath
-}
-
-export function formatBytes(bytes: number): string {
-	if (bytes < 1024) {
-		return `${bytes} B`
-	}
-
-	const units = ['KiB', 'MiB', 'GiB']
-
-	let value = bytes / 1024
-	let unit = 0
-
-	while (value >= 1024 && unit < units.length - 1) {
-		value /= 1024
-		unit++
-	}
-
-	return `${value.toFixed(2)} ${units[unit]}`
-}
-
-export function formatDuration(ms: number): string {
-	return ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`
-}
-
-// -----------------------------------------------------------------------------
-// Log formatting
-// -----------------------------------------------------------------------------
-
-export function dim(message: string) {
-	return styleText('dim', message)
-}
-
-export function green(message: string) {
-	return styleText('green', message)
-}
-
-export function bold(message: string) {
-	return styleText('bold', message)
 }
 
 // -----------------------------------------------------------------------------
@@ -208,6 +180,40 @@ export function createConfigHash(config: unknown, options: ResolvedOptions): str
 // -----------------------------------------------------------------------------
 // Logging
 // -----------------------------------------------------------------------------
+
+export function formatBytes(bytes: number): string {
+	if (bytes < 1024) {
+		return `${bytes} B`
+	}
+
+	const units = ['KiB', 'MiB', 'GiB']
+
+	let value = bytes / 1024
+	let unit = 0
+
+	while (value >= 1024 && unit < units.length - 1) {
+		value /= 1024
+		unit++
+	}
+
+	return `${value.toFixed(2)} ${units[unit]}`
+}
+
+export function formatDuration(ms: number): string {
+	return ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`
+}
+
+export function dim(message: string) {
+	return styleText('dim', message)
+}
+
+export function green(message: string) {
+	return styleText('green', message)
+}
+
+export function bold(message: string) {
+	return styleText('bold', message)
+}
 
 export function log(logger: Logger, options: ResolvedOptions, level: 1 | 2, message: string): void {
 	if (options.logLevel < level) {

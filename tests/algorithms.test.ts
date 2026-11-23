@@ -19,7 +19,7 @@ import {
 	createZstdCompressorFactory,
 	DEFAULT_ZSTD_OPTIONS,
 } from '../src/zstd.js'
-import { Readable } from 'node:stream'
+import { Readable, Writable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { CompressorFactory } from '../src/types.js'
 import { createNodeError } from './helpers/errors.js'
@@ -29,13 +29,16 @@ const { constants, gunzipSync, brotliDecompressSync, zstdDecompressSync } = zlib
 
 async function compress(factory: CompressorFactory) {
 	const chunks: Buffer[] = []
-	const sink = new (await import('node:stream')).Writable({
+
+	const sink = new Writable({
 		write(chunk, _encoding, callback) {
 			chunks.push(Buffer.from(chunk))
 			callback()
 		},
 	})
+
 	await pipeline(Readable.from(['test payload']), await factory(), sink)
+
 	return Buffer.concat(chunks)
 }
 
@@ -58,16 +61,16 @@ describe('gzip options and compressor', () => {
 	})
 
 	it('creates valid gzip streams with zlib when Zopfli is not requested', async () => {
-		const zlibFactory = vi.fn(zlib.createGzip)
 		const factory = await createGzipCompressorFactory(
 			fastGzip,
 			false,
 			false,
-			undefined,
-			zlibFactory,
 		)
+		const stream = await factory()
+		expect(stream).toBeInstanceOf(zlib.Gzip)
+		stream.destroy()
+		
 		expect(gunzipSync(await compress(factory)).toString()).toBe('test payload')
-		expect(zlibFactory).toHaveBeenCalled()
 	})
 
 	it('creates valid gzip streams with zopfli when not disabled', async () => {
@@ -82,15 +85,16 @@ describe('gzip options and compressor', () => {
 		const zopfliImporter = vi.fn(async () => {
 			throw missingPackage
 		})
-		const zlibFactory = vi.fn(zlib.createGzip)
 
-		const factory = await createGzipCompressorFactory({}, false, true, zopfliImporter, zlibFactory)
+		const factory = await createGzipCompressorFactory({}, false, true, zopfliImporter)
+		expect(zopfliImporter).toHaveBeenCalledOnce()
+
+		const stream = await factory()
+		expect(stream).toBeInstanceOf(zlib.Gzip)
+		stream.destroy()
 
 		const compressed = await compress(factory)
-
 		expect(gunzipSync(compressed).toString()).toBe('test payload')
-		expect(zopfliImporter).toHaveBeenCalledOnce()
-		expect(zlibFactory).toHaveBeenCalledOnce()
 	})
 
 	it('throws when Zopfli is explicitly requested but not available', async () => {
@@ -98,9 +102,8 @@ describe('gzip options and compressor', () => {
 		const zopfliImporter = async () => {
 			throw nodeError
 		}
-		await expect(
-			createGzipCompressorFactory({ zopfli: DEFAULT_ZOPFLI_OPTIONS }, true, false, zopfliImporter),
-		).rejects.toThrow(
+		const factoryPromise = createGzipCompressorFactory({ zopfli: DEFAULT_ZOPFLI_OPTIONS }, true, false, zopfliImporter)
+		await expect(factoryPromise).rejects.toThrow(
 			'The "node-zopfli-es" package is required when Zopfli is explicitly enabled. Install it with: pnpm add -D node-zopfli-es',
 		)
 	})
@@ -110,7 +113,8 @@ describe('gzip options and compressor', () => {
 		const zopfliImporter = async () => {
 			throw nodeError
 		}
-		await expect(createGzipCompressorFactory({}, false, true, zopfliImporter)).rejects.toThrow(
+		const factoryPromise = createGzipCompressorFactory({}, false, true, zopfliImporter)
+		await expect(factoryPromise).rejects.toThrow(
 			nodeError,
 		)
 	})

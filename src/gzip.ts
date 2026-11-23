@@ -69,7 +69,6 @@ export async function createGzipCompressorFactory(
 	explicitZopfli: boolean,
 	optionalZopfli: boolean,
 	zopfliImporter = importZopfli,
-	zlibFactory = createGzip,
 ): Promise<CompressorFactory> {
 	if (explicitZopfli && 'zopfli' in options) {
 		try {
@@ -123,5 +122,5 @@ export async function createGzipCompressorFactory(
 		throw new Error(`[${INTEGRATION_NAME}] Error: zopfli options could not be resolved`)
 	}
 
-	return () => zlibFactory(options)
+	return () => createGzip(options)
 }

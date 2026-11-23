@@ -38,13 +38,16 @@ const defaultOptions = {
 		incremental: true,
 		discardCompressionIfLarger: false,
 	},
+	cache: {
+		prune: false,
+	},
 	filters: {
 		minSize: 0,
 		fileTypes: ['.html'],
 		include: undefined,
 		exclude: undefined,
-		pruneCache: false,
 	},
+	filterWarnings: [],
 	failOnError: false,
 	logLevel: 2,
 	recompressOnConfigChange: false,
@@ -67,6 +70,10 @@ export function createResolvedOptions(
 		performance: {
 			...defaultOptions.performance,
 			...overrides.performance,
+		},
+		cache: {
+			...defaultOptions.cache,
+			...overrides.cache,
 		},
 		filters: {
 			...defaultOptions.filters,

@@ -15,7 +15,7 @@ import type { BrotliOptions, ZlibOptions, ZstdOptions } from 'node:zlib'
 export type ZopfliModule = typeof import('node-zopfli-es')
 export type ZopfliOptions = import('node-zopfli-es').Options
 
-// CompressionOptions
+// Algorithms
 export interface AlgorithmOptions {
 	gzip?: boolean | ZlibOptions | { zopfli: boolean | ZopfliOptions }
 	brotli?: boolean | BrotliOptions
@@ -28,23 +28,44 @@ export interface ResolvedAlgorithmOptions {
 	zstd: false | ZstdOptions
 }
 
+// Performance
 export interface PerformanceOptions {
 	concurrency: number
 	incremental: boolean
 	discardCompressionIfLarger: boolean
 }
 
+// Cache
+export interface CacheOptions {
+	prune: boolean
+}
+
+// Filters
+export type GlobFilter =
+	| string
+	| {
+			pattern: string
+			algorithms: CompressionAlgorithm[]
+	  }
+
+export interface ResolvedGlobFilter {
+	pattern: string
+	match: (path: string) => boolean
+	algorithms?: CompressionAlgorithm[]
+}
+
 export interface FilterOptions {
 	minSize: number
 	fileTypes: string[]
-	include?: string[]
-	exclude?: string[]
-	pruneCache: boolean
+	include?: GlobFilter[]
+	exclude?: GlobFilter[]
 }
 
+// Integration options
 export interface CompressionOptions {
 	algorithms?: AlgorithmOptions
 	performance?: Partial<PerformanceOptions>
+	cache?: Partial<CacheOptions>
 	filters?: Partial<FilterOptions>
 	failOnError?: boolean
 	logLevel?: LogLevel
@@ -54,7 +75,9 @@ export interface CompressionOptions {
 export interface ResolvedOptions {
 	algorithms: ResolvedAlgorithmOptions
 	performance: PerformanceOptions
+	cache: CacheOptions
 	filters: FilterOptions
+	filterWarnings: string[]
 	failOnError: boolean
 	logLevel: LogLevel
 	recompressOnConfigChange: boolean

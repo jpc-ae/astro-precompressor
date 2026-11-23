@@ -143,15 +143,7 @@ describe('cache helpers', () => {
 			await writeFile(`${output}.br`, 'brotli')
 			await writeFile(`${output}.zst`, 'zstd')
 
-			await removeDisabledOutputSidecars(
-				output,
-				{
-					gzip: false,
-					brotli: {},
-					zstd: false,
-				},
-				false,
-			)
+			await removeDisabledOutputSidecars(output, ['brotli'], false)
 
 			expect(await fileExists(`${output}.gz`)).toBe(false)
 			expect(await fileExists(`${output}.br`)).toBe(true)
@@ -168,15 +160,7 @@ describe('cache helpers', () => {
 			await writeFile(`${output}.br`, 'stale-brotli')
 			await writeFile(`${output}.zst`, 'stale-zstd')
 
-			await removeDisabledOutputSidecars(
-				output,
-				{
-					gzip: {},
-					brotli: false,
-					zstd: false,
-				},
-				true,
-			)
+			await removeDisabledOutputSidecars(output, ['gzip'], false)
 
 			expect(await fileExists(`${output}.gz`)).toBe(true)
 			expect(await readFile(`${output}.br`, 'utf8')).toBe('stale-brotli')
@@ -193,18 +177,27 @@ describe('cache helpers', () => {
 			await writeFile(`${output}.br`, 'brotli')
 			await writeFile(`${output}.zst`, 'zstd')
 
-			await removeDisabledOutputSidecars(
-				output,
-				{
-					gzip: {},
-					brotli: {},
-					zstd: false,
-				},
-				false,
-			)
+			await removeDisabledOutputSidecars(output, ['gzip', 'brotli'], false)
 
 			expect(await readFile(`${output}.gz`, 'utf8')).toBe('gzip')
 			expect(await readFile(`${output}.br`, 'utf8')).toBe('brotli')
+			expect(await fileExists(`${output}.zst`)).toBe(false)
+		})
+
+		it('removes sidecars for algorithms excluded from the file on a cache miss', async () => {
+			const root = await setup()
+			const output = join(root, 'dist', 'page.html')
+
+			await mkdir(join(root, 'dist'), { recursive: true })
+
+			await writeFile(`${output}.gz`, 'gzip')
+			await writeFile(`${output}.br`, 'brotli')
+			await writeFile(`${output}.zst`, 'zstd')
+
+			await removeDisabledOutputSidecars(output, ['brotli'], false)
+
+			expect(await fileExists(`${output}.gz`)).toBe(false)
+			expect(await fileExists(`${output}.br`)).toBe(true)
 			expect(await fileExists(`${output}.zst`)).toBe(false)
 		})
 	})
@@ -217,11 +210,7 @@ describe('cache helpers', () => {
 			await writeFile(join(root, 'page.html.br'), 'brotli')
 
 			await expect(
-				hasCacheHit(root, 'page.html', 'same-hash', 'same-hash', false, {
-					gzip: {},
-					brotli: {},
-					zstd: false,
-				}),
+				hasCacheHit(root, 'page.html', 'same-hash', 'same-hash', false, ['gzip', 'brotli']),
 			).resolves.toBe(true)
 		})
 
@@ -231,11 +220,7 @@ describe('cache helpers', () => {
 			await writeFile(join(root, 'page.html.gz'), 'gzip')
 
 			await expect(
-				hasCacheHit(root, 'page.html', 'same-hash', 'same-hash', false, {
-					gzip: {},
-					brotli: {},
-					zstd: false,
-				}),
+				hasCacheHit(root, 'page.html', 'same-hash', 'same-hash', false, ['gzip', 'brotli']),
 			).resolves.toBe(false)
 		})
 
@@ -245,11 +230,7 @@ describe('cache helpers', () => {
 			await writeFile(join(root, 'page.html.gz'), 'gzip')
 
 			await expect(
-				hasCacheHit(root, 'page.html', 'new-hash', 'old-hash', false, {
-					gzip: {},
-					brotli: false,
-					zstd: false,
-				}),
+				hasCacheHit(root, 'page.html', 'new-hash', 'old-hash', false, ['gzip']),
 			).resolves.toBe(false)
 		})
 
@@ -259,11 +240,35 @@ describe('cache helpers', () => {
 			await writeFile(join(root, 'page.html.gz'), 'gzip')
 
 			await expect(
-				hasCacheHit(root, 'page.html', 'same-hash', 'same-hash', true, {
-					gzip: {},
-					brotli: false,
-					zstd: false,
-				}),
+				hasCacheHit(root, 'page.html', 'same-hash', 'same-hash', true, ['gzip']),
+			).resolves.toBe(false)
+		})
+
+		it('checks only the algorithms selected for the file', async () => {
+			const root = await setup()
+
+			await writeFile(join(root, 'page.html.gz'), 'gzip')
+
+			await expect(
+				hasCacheHit(root, 'page.html', 'same-hash', 'same-hash', false, ['gzip']),
+			).resolves.toBe(true)
+		})
+
+		it('returns false when a selected algorithm artifact is missing', async () => {
+			const root = await setup()
+
+			await writeFile(join(root, 'page.html.gz'), 'gzip')
+
+			await expect(
+				hasCacheHit(root, 'page.html', 'same-hash', 'same-hash', false, ['gzip', 'brotli']),
+			).resolves.toBe(false)
+		})
+
+		it('returns false for an empty algorithm selection', async () => {
+			const root = await setup()
+
+			await expect(
+				hasCacheHit(root, 'page.html', 'same-hash', 'same-hash', false, []),
 			).resolves.toBe(false)
 		})
 	})

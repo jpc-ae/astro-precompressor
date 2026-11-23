@@ -4,11 +4,11 @@ import { randomUUID } from 'node:crypto'
 
 import { dirname } from 'node:path'
 
-import { ALGORITHM_EXTENSIONS, CACHE_VERSION } from './constants.js'
+import { ALGORITHM_EXTENSIONS, CACHE_VERSION, SUPPORTED_ALGORITHMS } from './constants.js'
 
 import { resolveInsideDirectory } from './utils.js'
 
-import type { CacheManifest, ResolvedAlgorithmOptions } from './types.js'
+import type { CacheManifest, CompressionAlgorithm, ResolvedAlgorithmOptions } from './types.js'
 
 // -----------------------------------------------------------------------------
 // Manifest
@@ -140,7 +140,7 @@ export async function pruneCache(
 }
 
 // -----------------------------------------------------------------------------
-// Remove disabled algorithms
+// Artifact cleanup
 // -----------------------------------------------------------------------------
 
 export async function removeDisabledArtifacts(
@@ -148,10 +148,11 @@ export async function removeDisabledArtifacts(
 	artifactDirectory: string,
 	algorithms: ResolvedAlgorithmOptions,
 ): Promise<void> {
-	for (const [algorithm, extension] of Object.entries(ALGORITHM_EXTENSIONS)) {
-		const typedAlgorithm = algorithm as keyof typeof ALGORITHM_EXTENSIONS
-		if (!algorithms[typedAlgorithm]) {
-			await rm(getArtifactPath(artifactDirectory, relativePath, extension), { force: true })
+	for (const algorithm of SUPPORTED_ALGORITHMS) {
+		if (!algorithms[algorithm]) {
+			await rm(getArtifactPath(artifactDirectory, relativePath, ALGORITHM_EXTENSIONS[algorithm]), {
+				force: true,
+			})
 		}
 	}
 }
@@ -166,24 +167,17 @@ export async function hasCacheHit(
 	currentHash: string,
 	cachedHash: string | undefined,
 	forceRecompress: boolean,
-	algorithms: ResolvedAlgorithmOptions,
+	algorithms: CompressionAlgorithm[],
 ): Promise<boolean> {
-	if (forceRecompress || currentHash !== cachedHash) {
+	if (forceRecompress || currentHash !== cachedHash || algorithms.length === 0) {
 		return false
 	}
 
-	const enabledAlgorithms = Object.entries(algorithms).filter(([, enabled]) => enabled)
-
-	if (enabledAlgorithms.length === 0) {
-		return false
-	}
-
-	for (const [algorithm] of enabledAlgorithms) {
-		const typedAlgorithm = algorithm as keyof typeof ALGORITHM_EXTENSIONS
+	for (const algorithm of algorithms) {
 		const artifactPath = getArtifactPath(
 			artifactDirectory,
 			relativePath,
-			ALGORITHM_EXTENSIONS[typedAlgorithm],
+			ALGORITHM_EXTENSIONS[algorithm],
 		)
 
 		if (!(await fileExists(artifactPath))) {
@@ -200,7 +194,7 @@ export async function hasCacheHit(
 
 export async function removeDisabledOutputSidecars(
 	sourcePath: string,
-	algorithms: ResolvedAlgorithmOptions,
+	selectedAlgorithms: CompressionAlgorithm[],
 	cacheHit: boolean,
 ): Promise<void> {
 	// On a cache hit, preserve the existing output directory unchanged.
@@ -208,11 +202,13 @@ export async function removeDisabledOutputSidecars(
 		return
 	}
 
-	for (const [algorithm, extension] of Object.entries(ALGORITHM_EXTENSIONS)) {
-		const typedAlgorithm = algorithm as keyof typeof ALGORITHM_EXTENSIONS
+	const selected = new Set(selectedAlgorithms)
 
-		if (!algorithms[typedAlgorithm]) {
-			await rm(`${sourcePath}${extension}`, { force: true })
+	for (const algorithm of SUPPORTED_ALGORITHMS) {
+		if (!selected.has(algorithm)) {
+			await rm(`${sourcePath}${ALGORITHM_EXTENSIONS[algorithm]}`, {
+				force: true,
+			})
 		}
 	}
 }

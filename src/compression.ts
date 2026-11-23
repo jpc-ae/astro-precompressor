@@ -12,7 +12,7 @@ import { performance } from 'node:perf_hooks'
 
 import { copyPreservingTimestamps, fileExists, getArtifactPath } from './cache.js'
 
-import { formatDuration, log } from './utils.js'
+import { formatDuration, getEnabledAlgorithms, log } from './utils.js'
 
 import type { Semaphore } from './semaphore.js'
 
@@ -148,15 +148,12 @@ export async function compressFile(
 	logger: Logger,
 	compressors: Compressors,
 	semaphore: Semaphore,
+	selectedAlgorithms: CompressionAlgorithm[] = getEnabledAlgorithms(options.algorithms),
 ): Promise<{
 	compressions: CompressionResult[]
 }> {
-	const enabledAlgorithms = Object.entries(options.algorithms)
-		.filter(([, enabled]) => enabled)
-		.map(([algorithm]) => algorithm as keyof typeof options.algorithms)
-
 	// Validate everything before starting any asynchronous work.
-	for (const algorithm of enabledAlgorithms) {
+	for (const algorithm of selectedAlgorithms) {
 		if (!compressors[algorithm]) {
 			throw new Error(`[${INTEGRATION_NAME}] Error: the ${algorithm} compressor could not be found`)
 		}
@@ -164,7 +161,7 @@ export async function compressFile(
 
 	const processors: Promise<CompressionResult>[] = []
 
-	for (const algorithm of enabledAlgorithms) {
+	for (const algorithm of selectedAlgorithms) {
 		processors.push(
 			processAlgorithm(
 				sourcePath,

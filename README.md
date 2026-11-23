@@ -22,7 +22,7 @@ performance.
 
 ## Quick Start
 
-Add the extension to your project with the `astro add` command.
+Add the integration to your project with the `astro add` command.
 
 ```bash
 # npm
@@ -67,8 +67,9 @@ filtering. They are also either restricted to node's zlib library or require
 command-line scripts.
 
 This package aims to be straightforward without sacrificing performance or
-flexibility. It offers optional Zopfli for better gzip compression, and is open
-to adding other engines on request (please
+flexibility. It offers optional Zopfli for better gzip compression as well as a
+fallback engine for Zstandard on older Node.js builds. Support for other
+compression engines can be added on request (please
 [open an issue](https://github.com/jpc-ae/astro-precompressor/issues) for any
 requests). Faster rebuilds using an incremental cache is the priority.
 
@@ -160,14 +161,15 @@ export default defineConfig({
 
 The integration accepts an optional configuration object.
 
-| Option                     | Default                                                 | Description                                         |
-| -------------------------- | ------------------------------------------------------- | --------------------------------------------------- |
-| `algorithms`               | Gzip, Brotli enabled; Zstandard disabled                | Compression algorithms and their settings           |
-| `filters`                  | Built-in filetypes; 150-byte minimum                    | Files eligible for compression                      |
-| `performance`              | System-derived concurrency; incremental caching enabled | Processing, caching, and output behaviour           |
-| `logLevel`                 | 2 (diagnostics available)                               | Logging verbosity                                   |
-| `failOnError`              | false                                                   | Whether compression errors fail the build           |
-| `recompressOnConfigChange` | false                                                   | Whether configuration changes trigger recompression |
+| Option                     | Default                                                 | Description                                               |
+| -------------------------- | ------------------------------------------------------- | --------------------------------------------------------- |
+| `algorithms`               | Gzip, Brotli enabled; Zstandard disabled                | Compression algorithms and their settings                 |
+| `performance`              | System-derived concurrency; incremental caching enabled | Concurrency, incremental processing, and output behaviour |
+| `cache`                    | Pruning enabled                                         | Cache maintenance and pruning                             |
+| `filters`                  | Built-in filetypes; 150-byte minimum                    | File eligibility and per-file algorithm selection         |
+| `logLevel`                 | 2 (diagnostics available)                               | Logging verbosity                                         |
+| `failOnError`              | false                                                   | Whether compression errors fail the build                 |
+| `recompressOnConfigChange` | false                                                   | Whether configuration changes trigger recompression       |
 
 Any provided options will be merged with the defaults. For example, `gzip` will
 still be enabled with the configuration below.
@@ -178,11 +180,14 @@ precompressor({
 		brotli: false,
 		zstd: true,
 	},
+	cache: {
+		prune: true,
+	},
 	filters: {
 		minSize: 1024,
 		fileTypes: ['.html', '.css', '.js', '.svg', '.txt'],
-		include: ['www/**'],
-		exclude: ['**/*.env', '**/.*/**'],
+		include: ['www/**', { pattern: '**/*.svg', algorithms: ['brotli'] }],
+		exclude: ['**/*.env', '**/.*/**', { pattern: '**/*.css', algorithms: ['zstd'] }],
 	},
 	logLevel: 0,
 })
@@ -208,7 +213,7 @@ algorithms: {
 > [!NOTE] The `constants` object used in the algorithm configurations below
 > comes from the `node:zlib` package.
 
-#### Gzip
+**Gzip**
 
 Gzip supports two compression engines:
 
@@ -245,10 +250,10 @@ gzip: {
 > at the expense of speed. In testing representative minified Astro output
 > files, setting it to `5` produced files that were identical in size to `15`
 > (the engine default) while being three times faster. `blocksplitting` has also
-> been turned off for a similar reason. These settings aim to provide producing
-> meaningful savings over standard gzip while avoiding the extreme processing
-> time associated with higher Zopfli iteration counts. Feel free to experiment
-> if maximum gzip compression is a priority for you rather than relying on
+> been turned off for a similar reason. These settings aim to provide meaningful
+> savings over standard gzip while avoiding the extreme processing time
+> associated with higher Zopfli iteration counts. Feel free to experiment if
+> maximum gzip compression is a priority for you rather than relying on
 > `brotli`.
 
 Even with the `node-zopfli-es` package installed, Zopfli can be explicitly
@@ -269,7 +274,7 @@ gzip: {
 }
 ```
 
-#### Brotli
+**Brotli**
 
 The default Brotli options prioritize compression ratio.
 
@@ -281,7 +286,7 @@ brotli: {
 }
 ```
 
-#### Zstandard
+**Zstandard**
 
 Since Brotli generally achieves better compression ratios than Zstandard for web
 assets and has been available in browsers for longer, it is the preferred option
@@ -315,9 +320,28 @@ using Astro 5 with an older `node` version, Zstandard output can still be
 created by installing the `zstd-napi` package which `astro-precompressor` will
 then automatically use as a fallback.
 
+### Cache
+
+The `cache` group controls how the cache should be managed when incremental
+compression is enabled. Its default options are shown below.
+
+```ts
+cache: {
+	prune: true,
+}
+```
+
+| Option  | Description                                            |
+| ------- | ------------------------------------------------------ |
+| `prune` | Remove obsolete cached artifacts and manifest entries. |
+
+> [!NOTE] Prior to v1.2.0, the `prune` option was controlled by setting
+> `pruneCache` under the `filters` property. It has been moved to its own group
+> for clarity.
+
 ### File Filtering
 
-The `filters` option controls which build output files should be compressed. Its
+The `filters` group controls which build output files should be compressed. Its
 default options are shown below.
 
 ```ts
@@ -355,18 +379,16 @@ filters: {
   ],
   include: undefined,
   exclude: undefined,
-  pruneCache: true,
 }
 // ...
 ```
 
-| Option       | Description                                               |
-| ------------ | --------------------------------------------------------- |
-| `minSize`    | Minimum source file size in bytes.                        |
-| `fileTypes`  | File extensions eligible for compression.                 |
-| `include`    | Glob patterns specifying files to include.                |
-| `exclude`    | Glob patterns specifying files or directories to exclude. |
-| `pruneCache` | Remove obsolete cached artifacts and manifest entries.    |
+| Option      | Description                                               |
+| ----------- | --------------------------------------------------------- |
+| `minSize`   | Minimum source file size in bytes.                        |
+| `fileTypes` | File extensions eligible for compression.                 |
+| `include`   | Glob patterns specifying files to include.                |
+| `exclude`   | Glob patterns specifying files or directories to exclude. |
 
 If `fileTypes` is specified, the default types are replaced completely. For
 easier configuration, the `WEB_FILE_TYPES`, `DATA_FILE_TYPES` and
@@ -389,28 +411,126 @@ export default defineConfig({
 })
 ```
 
+Files are evaluated against the global filters first:
+
+1. Files with extensions not listed in `fileTypes` are skipped.
+2. Files smaller than `minSize` are skipped.
+3. Files matching any string exclude pattern are skipped.
+4. If include patterns are configured, files that don't match any include
+   pattern are skipped.
+
+For files that pass these checks, matching include and exclude objects determine
+which globally enabled compression algorithms are used.
+
+**Pattern Matching**
+
 Include and exclude patterns use
 [picomatch](https://github.com/micromatch/picomatch).
 
 Patterns are matched against paths relative to the output directory and use
 forward slashes.
 
-For example:
+Each entry can be either a string representing a glob pattern or an object
+specifying the algorithms to which a pattern applies.
 
 ```ts
-exclude: ['drafts/**', '**/ignored/**']
+filters: {
+	include: [
+		'**/*.html',
+		{ pattern: '**/*.css', algorithms: ['gzip'] },
+		{ pattern: '**/*.svg', algorithms: ['brotli'] },
+	],
+	exclude: [
+		'**/admin/**',
+		{ pattern: '**/*.css', algorithms: ['gzip', 'zstd'] },
+	],
+}
 ```
 
-The first pattern excludes files beneath the root-level `drafts` directory. The
-second excludes any directory named `ignored`.
+A string pattern applies to all globally enabled algorithms. An object pattern
+applies only to the algorithms listed in its `algorithms` array.
 
-Files are matched in the following order:
+> [!IMPORTANT] The top-level `algorithms` and `filters.fileTypes` options are
+> authoritative. Glob filters can restrict which globally enabled algorithms are
+> used for a file, but cannot enable an algorithm that is globally disabled.
+> Likewise, include patterns cannot make a filetype eligible if it is excluded
+> by `filters.fileTypes`.
 
-1. If include patterns are configured, files that don't match any of them are
-   skipped.
-2. Files matching an exclude pattern are skipped.
-3. Files with extensions not listed in fileTypes are skipped.
-4. Files smaller than `minSize` are skipped.
+**Include Rules**
+
+- If no include patterns are configured, all files that pass the other filters
+  are eligible for every globally enabled algorithm.
+- If include patterns are configured, a file must match at least one include
+  pattern.
+- A string include pattern makes the file eligible for every globally enabled
+  algorithm.
+- An object include pattern makes the file eligible for the algorithms listed in
+  its `algorithms` array.
+- If multiple include patterns match, their algorithm selections are combined.
+  If any matching pattern is a string, all globally enabled algorithms are
+  eligible before exclusions are applied.
+
+**Exclude Rules**
+
+- A file matching any string exclude pattern is excluded entirely.
+- An object exclude pattern removes only the algorithms listed in its
+  `algorithms` array.
+- Multiple exclude patterns are applied independently. If any matching rule
+  excludes an algorithm, that algorithm is not used.
+- Exclusions take precedence over inclusions.
+
+**Combining Pattern Rules**
+
+The following table illustrates how matching include and exclude rules are
+combined. It assumes all three algorithms are globally enabled and the file
+passes the `fileTypes` and `minSize` filters.
+
+| Matching include rules                      | Matching exclude rules     | Result                  |
+| ------------------------------------------- | -------------------------- | ----------------------- |
+| No include patterns configured              | None                       | Gzip, Brotli, Zstandard |
+| String pattern                              | None                       | Gzip, Brotli, Zstandard |
+| Object specifying ['gzip']                  | None                       | Gzip                    |
+| Objects specifying ['gzip'] and ['brotli']  | None                       | Gzip, Brotli            |
+| String pattern                              | Object specifying ['gzip'] | Brotli, Zstandard       |
+| Object specifying ['gzip', 'brotli']        | Object specifying ['gzip'] | Brotli                  |
+| Any matching include pattern                | String pattern             | File excluded           |
+| Include patterns configured, but none match | None                       | File skipped            |
+
+> [!NOTE] The resulting algorithms are always limited to those enabled in the
+> top-level `algorithms` configuration. If no algorithms remain after applying
+> the matching rules, the file is skipped.
+
+**Empty Algorithm Lists**
+
+An object pattern must specify at least one algorithm. If its list is empty and
+`failOnError` is false, the rule is ignored with a warning. When `failOnError`
+is true, the configuration will fail. Invalid glob patterns and unknown
+algorithm names will always fail.
+
+**Example**
+
+```ts
+filters: {
+  fileTypes: ['.html', '.css', '.svg'],
+  include: [
+    '**/*.{html|svg}',
+    { pattern: '**/*.css', algorithms: ['gzip'] },
+  ],
+  exclude: [
+    '**/drafts/**',
+    { pattern: '**/*.svg', algorithms: ['gzip'] },
+  ],
+}
+```
+
+In this example, HTML files receive every globally enabled algorithm, CSS files
+receive Gzip only, and SVG files receive every globally enabled algorithm except
+Gzip. Files beneath `drafts/` are excluded entirely.
+
+> [!TIP] Because files only need to match one include pattern, adding `**` or
+> `'**/**'` (which match all file paths) to the include list causes all
+> otherwise eligible files pass the include filter, regardless of any other
+> include patterns specified.
 
 ### Performance
 
@@ -461,8 +581,14 @@ unchanged files can reuse cached results.
 The cache is maintained independently of the build output, allowing compressed
 sidecars to be restored along with their modification timestamps.
 
-When `filters.pruneCache` is enabled, obsolete artifacts associated with files
-that no longer exist in the output directory are removed.
+When `cache.prune` is enabled, obsolete cached compression artifacts and
+manifest entries are removed. This keeps the incremental cache from retaining
+entries that are no longer relevant to the current build.
+
+Output sidecars are handled separately from cache pruning. If Vite's
+`build.emptyOutDir` option is manually set to `false`, output sidecars will be
+removed if their source files have changed. Otherwise, they will automatically
+be cleaned up by Vite prior to every build.
 
 ## Output
 
@@ -479,7 +605,7 @@ dist/
 │ └─ styles.css
 ```
 
-The resulting output may look like:
+The resulting output will look like:
 
 ```text
 dist/
@@ -542,9 +668,9 @@ The integration uses Astro's build lifecycle hooks:
 ### Apache
 
 Apache's `rewrite_module` (`mod_rewrite.c`) can be used to redirect browsers to
-the sidecars. Here is a sample `.htaccess` configuration that will work for most
-sites with the default options enabled. It does not include a section for
-Zstandard, since that algorithm is disabled by default.
+the sidecars by rewriting requests. Here is a sample `.htaccess` configuration
+that will work for most sites with the default options enabled. It does not
+include a section for Zstandard, since that algorithm is disabled by default.
 
 ```apacheconf
 # SERVE COMPRESSED FILES
