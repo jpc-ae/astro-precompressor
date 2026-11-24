@@ -1,34 +1,34 @@
 name: Publish to npm
 
 on:
-  release:
-    types: [published]
+   release:
+      types: [ published ]
 
 permissions:
-  contents: read
-  id-token: write
+   contents: read
+   id-token: write
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+   publish:
+      runs-on: ubuntu-latest
 
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v7
+      steps:
+       - name: Checkout
+         uses: actions/checkout@v7
 
-    - name: Setup pnpm and Node.js
-      uses: pnpm/setup@v3
-      with:
-        runtime: node@24
-        require-lockfile: true
+       - name: Setup pnpm and Node.js
+         uses: pnpm/setup@v3
+         with:
+            runtime: node@24
+            require-lockfile: true
 
-    - name: Confirm versions
-      run: |
-        node --version
-        pnpm --version
+       - name: Confirm versions
+         run: |
+            node --version
+            pnpm --version
 
-    - name: Build package
-      run: pnpm build
+       - name: Build package
+         run: pnpm build
 
-    - name: Publish to npm
-      run: pnpm publish --provenance
+       - name: Publish to npm
+         run: pnpm publish --provenance

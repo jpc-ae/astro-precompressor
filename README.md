@@ -6,6 +6,7 @@ optionally, Zstandard.
 [![Tests](https://github.com/jpc-ae/astro-precompressor/actions/workflows/test.yml/badge.svg)](https://github.com/jpc-ae/astro-precompressor/actions/workflows/test.yml)
 
 [![Latest](https://img.shields.io/npm/v/astro-precompressor)](https://www.npmjs.com/package/astro-precompressor)
+[![EffVer Versioning](https://img.shields.io/badge/version_scheme-EffVer-0097a7)](https://jacobtomlinson.dev/effver)
 [![License](https://img.shields.io/github/license/jpc-ae/astro-precompressor)](LICENSE)
 
 `astro-precompressor` runs after Astro finishes building your project,
