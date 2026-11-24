@@ -8,6 +8,11 @@ updates:
       interval: weekly
       day: monday
    open-pull-requests-limit: 5
+   ignore:
+    # Exclude peerDependencies
+    - dependency-name: "astro"
+    - dependency-name: "node-zopfli-es"
+    - dependency-name: "zstd-napi"
    groups:
       development-dependencies:
          dependency-type: development
@@ -16,6 +21,21 @@ updates:
           - patch
       production-dependencies:
          dependency-type: production
+         update-types:
+          - minor
+          - patch
+
+ # Integration test fixture (latest)
+ - package-ecosystem: npm
+   directory: "/integration-tests/fixtures/latest"
+   schedule:
+      interval: weekly
+      day: monday
+   open-pull-requests-limit: 5
+   groups:
+      fixture-dependencies:
+         patterns:
+          - "*"
          update-types:
           - minor
           - patch
