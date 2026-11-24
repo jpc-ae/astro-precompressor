@@ -3,6 +3,6 @@
 	"private": true,
 	"type": "module",
 	"devDependencies": {
-		"astro": "5.0.0"
+		"astro": "7.4.7"
 	}
 }
