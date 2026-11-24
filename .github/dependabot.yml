@@ -4,6 +4,8 @@ updates:
  # npm dependencies
  - package-ecosystem: npm
    directory: "/"
+   exclude-paths:
+    - "integration-tests/**"
    schedule:
       interval: weekly
       day: monday
